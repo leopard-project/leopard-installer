@@ -7,7 +7,6 @@
 
 #define LINE_CAP    256
 #define O_RDONLY    0
-#define SEEK_SET    0
 #define SEEK_END    2
 #define SECTOR_SIZE 512
 #define MOUNT_POINT "/mnt"
@@ -26,10 +25,6 @@ static int fd_open(const char *path, uint64_t flags) {
 static int64_t fd_lseek(int fd, int64_t off, uint64_t whence) {
     return (int64_t)enter_syscall(SYS_LSEEK, (uint64_t)fd, (uint64_t)off, whence, 0, 0, 0);
 }
-static int64_t fd_read(int fd, void *buf, size_t size) {
-    return (int64_t)enter_syscall(SYS_READ, (uint64_t)fd, (uint64_t)buf, (uint64_t)size, 0, 0, 0);
-}
-
 static int fd_close(int fd) {
     return (int)enter_syscall(SYS_CLOSE, (uint64_t)fd, 0, 0, 0, 0, 0);
 }
@@ -126,59 +121,6 @@ static int do_mount(const char *dev) {
 
 static int do_install(void) {
     xapi_Printf("Installing base system from %s...\n", MEDIA_REPO);
-    /* 调试：用 Linux read syscall 读 repodata 实际大小 + 前 8 字节 */
-    {
-        int rfd = fd_open("/media/x86_64-repodata", O_RDONLY);
-        if (rfd >= 0) {
-            int64_t sz = fd_lseek(rfd, 0, SEEK_END);
-            fd_lseek(rfd, 0, SEEK_SET);
-            unsigned char head[8] = {0};
-            int64_t n = fd_read(rfd, head, sizeof(head));
-            xapi_Printf("[dbg-repodata] size=%lld read=%lld head=%02x%02x%02x%02x%02x%02x%02x%02x\n",
-                        (long long)sz, (long long)n, head[0],head[1],head[2],head[3],head[4],head[5],head[6],head[7]);
-            fd_close(rfd);
-        } else {
-            xapi_Printf("[dbg-repodata] open failed fd=%d\n", rfd);
-        }
-    }
-    /* 调试3：直接测 fstat(SYS_fstat=5) + fstatat(SYS_newfstatat=262, AT_EMPTY_PATH) */
-    {
-        int ffd = fd_open("/media/x86_64-repodata", 0);
-        if (ffd >= 0) {
-            unsigned char sbuf[160]; memset(sbuf, 0, sizeof(sbuf));
-            int fr = (int)enter_syscall(5, (uint64_t)ffd, (uint64_t)sbuf, 0, 0, 0, 0);
-            long long fsz = *(long long *)(sbuf + 48);
-            unsigned int fmode = *(unsigned int *)(sbuf + 24);
-            xapi_Printf("[dbg-fstat] ret=%d st_size=%lld st_mode=0%o\n", fr, fsz, fmode);
-
-            unsigned char sbuf2[160]; memset(sbuf2, 0, sizeof(sbuf2));
-            int fr2 = (int)enter_syscall(262, (uint64_t)ffd, (uint64_t)"", (uint64_t)sbuf2, 0x1000, 0, 0);
-            long long fsz2 = *(long long *)(sbuf2 + 48);
-            xapi_Printf("[dbg-fstatat] ret=%d st_size=%lld\n", fr2, fsz2);
-            /* 全量校验：读 1590 字节求和 + 采样 */
-            {
-                fd_lseek(ffd, 0, SEEK_SET);
-                unsigned char full[1600]; memset(full, 0, sizeof(full));
-                int64_t fn = fd_read(ffd, full, sizeof(full));
-                unsigned long fsum = 0;
-                for (int i = 0; i < (int)fn; i++) fsum += full[i];
-                xapi_Printf("[dbg-sum] read=%lld sum=%lu b8=%02x%02x b16=%02x%02x b512=%02x%02x\n",
-                            (long long)fn, fsum, full[8],full[9], full[16],full[17], full[512],full[513]);
-            }
-            fd_close(ffd);
-        }
-    }
-    /* 调试2：模拟 libarchive 的 O_CLOEXEC 打开 + 4096 字节读 */
-    {
-        int fd2 = fd_open("/media/x86_64-repodata", 0x80000);
-        xapi_Printf("[dbg-cloexec] open(O_CLOEXEC=0x80000) fd=%d\n", fd2);
-        if (fd2 >= 0) {
-            unsigned char big[4096];
-            int64_t bn = fd_read(fd2, big, sizeof(big));
-            xapi_Printf("[dbg-read4096] read=%lld head=%02x%02x%02x%02x\n", (long long)bn, big[0],big[1],big[2],big[3]);
-            fd_close(fd2);
-        }
-    }
     char *argv[] = { (char*)"xbps-install", (char*)"-y", (char*)"-r", (char*)MOUNT_POINT,
                      (char*)"-R", (char*)MEDIA_REPO,
                      (char*)"OpenXSBoot", (char*)"OpenXSKernel", (char*)"leopard-base",
