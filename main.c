@@ -184,7 +184,8 @@ static int do_install(void) {
                      (char*)"OpenXSBoot", (char*)"OpenXSKernel", (char*)"leopard-base",
                      (char*)"leopard-rc", (char*)"leopard-getty", (char*)"leopard-oobe",
                      (char*)"leopard-shell", (char*)"poweroff", (char*)"initctl",
-                     (char*)"leopard-mountd", (char*)"xbps", NULL };
+                     (char*)"leopard-mountd", (char*)"leopard-disk", (char*)"mkfs-fat32",
+                     (char*)"leopard-ime", (char*)"xbps", NULL };
     if (run_cmd("/apps/system/xbps-install", argv) != 0) {
         xapi_Printf("xbps-install failed (需 xbps 内部路径重编后才可用)\n");
         return -1;
