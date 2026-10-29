@@ -16,7 +16,7 @@ static const char *CORE_PACKAGES[] = {
 };
 
 static const char *EXTRA_PACKAGES[] = {
-        "poweroff", "initctl", "leopard-disk", "mkfs-fat32", "leopard-ime", NULL
+        "leopard-utils", NULL
 };
 
 static int install_set(const char *const *pkgs, const char *set_name)

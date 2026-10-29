@@ -25,7 +25,7 @@ data/leopard-install.conf           安装选项（auto / disk / scheme / init �
   反查起始索引；根分区必须排第 0（`mount_root` 只认索引最低且带启动标记的分区）。
 - **写文件先删后写**：`xapi_WriteFile` 不截断；探测存在性用 `xapi_ReadFile` 读 1 字节，
   不要用 `xapi_OpenFile/CloseFile`（整文件读-改-写）。
-- **包名用实名**：`poweroff`、`initctl`、`xbps`（与仓库目录名不同）。
+- **包名用实名**：`leopard-utils`（单包，含 poweroff/initctl/lpdisk/mkfs-fat32）、`xbps`（与仓库目录名 `leopard-xbps` 不同）。
 - 不新增内核 syscall、不改 `OpenXSKernel`；只用既有原语（`SYS_MOUNT`/`SYS_UMOUNT2`/`SYS_WAIT4`/`SYS_SYNC`…）。
 
 ## 状态键（步骤间契约）
