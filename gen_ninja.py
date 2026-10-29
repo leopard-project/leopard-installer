@@ -1,5 +1,19 @@
 #!/usr/bin/env python3
-"""leopard-installer 构建 + xbps 打包（build / pack 两个 target）。"""
+"""leopard-installer 构建 + xbps 打包（序列编排器 + 多可执行文件步骤程序）。
+
+架构：
+  main.c    序列编排器：读 /config/leopard-install-sequence.conf，按行序以「全路径、
+            无参数」执行步骤程序，等它退出；失败问重试/关机；全成功则重启。
+  steps/*.c 步骤程序：每个安装步骤一个独立可执行文件，只通过
+            /config/installer/state（key=value）交换数据，可单独替换/重排/重跑。
+
+产物：
+  out/leopard-installer.elf                 编排器 → apps/system/leopard-installer.elf
+  out/steps/<id>.elf                        步骤程序 → apps/leopard/installer/steps/<id>.elf
+  out/leopard-installer-<ver>.x86_64.xbps   一个包，含编排器 + 全部步骤 + 序列/选项配置
+
+用法：python3 gen_ninja.py && ninja build / ninja pack
+"""
 import os
 from pathlib import Path
 
@@ -9,8 +23,30 @@ INC  = SDK / "include"
 OBJ  = SDK / "obj-tui"
 OUT  = ROOT / "out"
 
-SOURCES = ["main.c"]
-TARGET  = OUT / "leopard-installer.elf"
+# 步骤程序共享的库（状态 / 选项 / 日志 / 交互 / 子进程 / 块设备）
+COMMON_SOURCES = ["lib/li_core.c"]
+
+# 步骤程序：(id, 源文件)。id 同时是产物名和 sequence.conf 里的文件名。
+STEPS = [
+    ("10-disk",       "steps/10-disk.c"),
+    ("20-partition",  "steps/20-partition.c"),
+    ("30-format",     "steps/30-format.c"),
+    ("40-mount",      "steps/40-mount.c"),
+    ("50-packages",   "steps/50-packages.c"),
+    ("60-config",     "steps/60-config.c"),
+    ("70-bootloader", "steps/70-bootloader.c"),
+    ("80-verify",     "steps/80-verify.c"),
+    ("90-finish",     "steps/90-finish.c"),
+]
+
+# 纯数据文件（相对本仓 → 安装路径）
+DATA = [
+    ("data/leopard-install-sequence.conf", "config/leopard-install-sequence.conf"),
+    ("data/leopard-install.conf",          "config/leopard-install.conf"),
+]
+
+ORCH_INSTALL = "apps/system/leopard-installer.elf"
+STEP_INSTALL = "apps/leopard/installer/steps"
 
 RUNTIME  = ["crt0.o", "libsys.cpp.o", "xgui_stubs.cpp.o",
             "constart.cpp.o", "xtuiapi.cpp.o", "krlibc.cpp.o"]
@@ -18,12 +54,10 @@ LIBALLOC = OBJ / "liballoc-x86_64.a"
 
 PKG = {
     "pkgname": "leopard-installer",
-    "pkgver":  "1.0_1",
+    "pkgver":  "1.1_1",
     "arch":    "x86_64",
-    "desc":    "Leopard installer",
+    "desc":    "Leopard installer (sequencer + step programs)",
     "deps":    "",
-    "install": "apps/system/leopard-installer.elf",
-    "data":    [],
 }
 
 
@@ -41,29 +75,6 @@ def esc(p):
     return rel(p).replace("$", "$$").replace(":", "$:").replace(" ", "$ ")
 
 
-def emit_package(L, pkg, target):
-    inst = pkg["install"]
-    data = pkg.get("data", [])
-    out  = OUT / f"{pkg['pkgname']}-{pkg['pkgver']}.{pkg['arch']}.xbps"
-
-    args = f"-A {pkg['arch']} -n {pkg['pkgname']}-{pkg['pkgver']} -s \"{pkg['desc']}\""
-    if pkg.get("deps"):
-        args += f" -D \"{pkg['deps']}\""
-
-    files = [(target, inst)] + [(ROOT / s, d) for s, d in data]
-
-    cmd = "rm -rf .pkg"
-    for src, dst in files:
-        cmd += f" && mkdir -p .pkg/$$(dirname {dst}) && cp {esc(src)} .pkg/{dst}"
-    cmd += f" && cd out && xbps-create --compression gzip {args} ../.pkg"
-
-    L += ["rule package", f"  command = {cmd}", ""]
-    L += [f"build {esc(out)}: package {' '.join(esc(s) for s, _ in files)}"]
-    L += [f"build build: phony {esc(target)}"]
-    L += [f"build pack: phony {esc(out)}"]
-    L += ["default build"]
-
-
 def main():
     cc   = os.environ.get("CC",  "clang")
     cxx  = os.environ.get("CXX", "clang++")
@@ -73,10 +84,10 @@ def main():
 
     common = (f"{col} {opt} -Wall -g -ffreestanding -fno-builtin -m64 -mstackrealign "
               "-fno-stack-protector -fno-exceptions -fno-strict-aliasing -fshort-wchar -nostdinc")
-    c_flags   = f"{common} -std=c11   -I {rel(INC)} -I . -MMD -MP"
-    cpp_flags = f"{common} -std=c++11 -I {rel(INC)} -I . -Wno-write-strings -MMD -MP"
+    c_flags   = f"{common} -std=c11   -I {rel(INC)} -I {rel(ROOT / 'include')} -I . -MMD -MP"
+    cpp_flags = f"{common} -std=c++11 -I {rel(INC)} -I {rel(ROOT / 'include')} -I . -Wno-write-strings -MMD -MP"
 
-    L = ["# leopard-installer 构建 + xbps 打包", "ninja_required_version = 1.10",
+    L = ["# leopard-installer 构建 + xbps 打包（编排器 + 步骤程序）", "ninja_required_version = 1.10",
          f"cc = {cc}", f"cxx = {cxx}", f"ld = {ld}",
          f"c_flags = {c_flags}", f"cpp_flags = {cpp_flags}", ""]
     L += [
@@ -90,23 +101,53 @@ def main():
         "  command = $ld -Ttext=0x200000 $in -o $out", "",
     ]
 
-    app_objs = []
-    for src in SOURCES:
+    def obj_for(src):
         rule = "cc" if src.endswith(".c") else "cxx"
         obj = OUT / (src + ".o")
-        L += [f"build {esc(obj)}: {rule} {esc(ROOT / src)}"]
-        app_objs.append(obj)
-    L += [""]
+        L.append(f"build {esc(obj)}: {rule} {esc(ROOT / src)}")
+        return obj
 
-    ins = [OBJ / n for n in RUNTIME] + app_objs + [LIBALLOC]
-    L += [f"build {esc(TARGET)}: link {' '.join(esc(o) for o in ins)}", ""]
+    common_objs = [obj_for(src) for src in COMMON_SOURCES]
+    L.append("")
 
-    emit_package(L, PKG, TARGET)
+    # 编排器：main.c 自己完成输入/等待/重启，不链接 steps 的公共库
+    orch_target = OUT / "leopard-installer.elf"
+    orch_objs   = [obj_for("main.c")]
+    ins = [OBJ / n for n in RUNTIME] + orch_objs + [LIBALLOC]
+    L += [f"build {esc(orch_target)}: link {' '.join(esc(o) for o in ins)}", ""]
 
+    # 步骤程序：每个都链接公共库
+    step_targets = []
+    for step_id, src in STEPS:
+        target = OUT / "steps" / f"{step_id}.elf"
+        objs   = [obj_for(src)]
+        ins = [OBJ / n for n in RUNTIME] + common_objs + objs + [LIBALLOC]
+        L += [f"build {esc(target)}: link {' '.join(esc(o) for o in ins)}", ""]
+        step_targets.append(target)
+
+    # ---- xbps 包：编排器 + 全部步骤 + 序列/选项配置 ----
+    out_pkg = OUT / f"{PKG['pkgname']}-{PKG['pkgver']}.{PKG['arch']}.xbps"
+    files = [(orch_target, ORCH_INSTALL)]
+    for step_id, _src in STEPS:
+        files.append((OUT / "steps" / f"{step_id}.elf", f"{STEP_INSTALL}/{step_id}.elf"))
+    files += [(ROOT / src, dst) for src, dst in DATA]
+
+    args = f"-A {PKG['arch']} -n {PKG['pkgname']}-{PKG['pkgver']} -s \"{PKG['desc']}\""
+    cmd = "rm -rf .pkg"
+    for src, dst in files:
+        cmd += f" && mkdir -p .pkg/$$(dirname {dst}) && cp {esc(src)} .pkg/{dst}"
+    cmd += f" && cd out && xbps-create --compression gzip {args} ../.pkg"
+
+    L += ["rule package", f"  command = {cmd}", ""]
+    L += [f"build {esc(out_pkg)}: package {' '.join(esc(s) for s, _ in files)}"]
+    L += [f"build build: phony {' '.join([esc(orch_target)] + [esc(t) for t in step_targets])}"]
+    L += [f"build pack: phony {esc(out_pkg)}"]
+    L += ["default build"]
     L += ["rule clean", "  command = rm -rf out .pkg", "build clean: clean"]
 
     (ROOT / "build.ninja").write_text("\n".join(L) + "\n", encoding="utf-8")
-    print("已生成 build.ninja（leopard-installer）。用法：ninja build / ninja pack")
+    print("已生成 build.ninja（leopard-installer：编排器 + 9 个步骤程序）。"
+          "用法：ninja build / ninja pack")
 
 
 if __name__ == "__main__":
