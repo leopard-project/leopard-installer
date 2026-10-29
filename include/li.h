@@ -12,7 +12,7 @@
  *      因此任何一步都能单独替换、重排、重跑。
  *
  * 选项文件 /config/leopard-install.conf（key=value，作为默认值先加载）：
- *   auto=1             无人值守（步骤不再提问）
+ *   auto=1             无人值守（步骤不再提问；失败即关机，不重试、不阻塞等键盘）
  *   disk=sata0         目标磁盘
  *   scheme=auto|custom 分区方案（custom 需另给 part.N.mount / part.N.size_mb）
  *   init=...           boot.conf 里的 PID1 路径

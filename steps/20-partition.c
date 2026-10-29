@@ -320,8 +320,12 @@ int main(int argc, char *argv[], char *envp[])
 
         if (strcmp(scheme, "custom") == 0) {
                 rc = custom_layout();
-                if (rc != 0) rc = ask_custom_layout();
-                if (rc != 0) return li_step_end(li_fail("custom layout invalid", 0));
+                /* auto 模式无法交互补全：配置不全就明确失败，不落到交互询问。 */
+                if (rc != 0 && !li_is_auto()) rc = ask_custom_layout();
+                if (rc != 0)
+                        return li_step_end(li_fail(li_is_auto()
+                                ? "auto mode: scheme=custom but part.* config missing"
+                                : "custom layout invalid", 0));
                 li_state_set("scheme", "custom");
         } else {
                 if (auto_layout() != 0)

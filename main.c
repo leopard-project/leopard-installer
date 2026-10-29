@@ -14,6 +14,7 @@
 
 static void shutdown_now(void);
 static void reboot_now(void);
+static int  install_is_auto(void);
 
 static inline void read_line(char *buf, size_t cap)
 {
@@ -32,10 +33,60 @@ static inline int run_step(const char *path)
         return status;
 }
 
+/* 读一个 key=value 文本文件里的 auto 值；返回 1/0，未找到返回 -1。 */
+static int file_auto(const char *path)
+{
+        XFILE   *fp = xapi_OpenFile((WSTR)path);
+        char     buf[4096];
+        uint64_t len;
+        uint64_t got;
+        int      result = -1;
+        char    *line;
+
+        if (fp == NULL) return -1;
+        len = fp->length;
+        if (len >= sizeof(buf)) len = sizeof(buf) - 1;
+        memset(buf, 0, sizeof(buf));
+        got = xapi_ReadFile((WSTR)path, buf, len, 0);
+        xapi_CloseFile(fp);
+        buf[got] = '\0';
+
+        line = buf;
+        while (*line) {
+                char *nl = strchr(line, '\n');
+                if (nl) *nl = '\0';
+                while (*line == ' ' || *line == '\t' || *line == '\r') line++;
+                if (strncmp(line, "auto=", 5) == 0) {
+                        const char *v = line + 5;
+                        result = (strcmp(v, "1") == 0 || strcmp(v, "yes") == 0 || strcmp(v, "true") == 0);
+                }
+                if (!nl) break;
+                line = nl + 1;
+        }
+        return result;
+}
+
+/* 与 li_is_auto 语义一致：选项文件先，state 覆盖；都没有则按交互模式。 */
+static int install_is_auto(void)
+{
+        int opt = file_auto("/config/leopard-install.conf");
+        int st  = file_auto("/config/installer/state");
+
+        if (st >= 0) return st;
+        if (opt >= 0) return opt;
+        return 0;
+}
+
 static inline int ask_retry(void)
 {
-        xapi_Printf("retry or shutdown? [r/s]: ");
         char line[16];
+
+        /* auto 模式：零输入，失败即关机，绝不阻塞等键盘 */
+        if (install_is_auto()) {
+                xapi_Printf("auto mode: step failed, shutting down (no retry)\n");
+                return 0;
+        }
+        xapi_Printf("retry or shutdown? [r/s]: ");
         read_line(line, sizeof(line));
         return (line[0] == 'r' || line[0] == 'R');
 }

@@ -64,7 +64,8 @@ int main(int argc, char *argv[], char *envp[])
         li_state_set("disk.sectors", value);
         li_log("target disk: /dev/%s (%llu sectors)", disk, (unsigned long long)sectors);
 
-        if (!li_confirm("All data on this disk will be destroyed. Continue?", 0))
+        /* auto 模式 = 脚本化的明确意图：跳过破坏性确认（否则默认「否」会自断）。 */
+        if (!li_is_auto() && !li_confirm("All data on this disk will be destroyed. Continue?", 0))
                 return li_step_end(li_fail("aborted by user", 0));
 
         return li_step_end(0);
