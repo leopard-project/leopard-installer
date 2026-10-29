@@ -1,11 +1,42 @@
 # PROJECT KNOWLEDGE BASE — leopard-installer
 
-LeopardOS 安装器（CLI，Debian 式），在 live 环境运行（initrc 尾端代替 getty），编排现成工具：
-列磁盘 → 选盘 → lpdisk 分区 → mkfs-fat32 格式化 → SYS_MOUNT 挂载 → …
+LeopardOS 安装器：**序列编排器（main.c）+ 多可执行文件步骤程序（steps/）**。
 
-## 构建
-    python3 gen_ninja.py && ninja build   # → out/leopard-installer.elf
-    ninja pack
+```
+main.c                              编排器：读 /config/leopard-install-sequence.conf，
+                                    按行序以「全路径、无参数」执行步骤程序；失败问重试/关机
+steps/NN-*.c                        每个安装步骤一个独立可执行文件
+include/li.h + lib/li_core.c        步骤程序公共库（状态/选项/日志/交互/子进程/块设备）
+data/leopard-install-sequence.conf  步骤清单（行序=执行顺序）
+data/leopard-install.conf           安装选项（auto / disk / scheme / init …）
+```
 
-- 静态 ELF，依赖 `../leopard-sdk`。
-- 不新增内核 syscall：只复用分区/格式化/挂载等现成工具与内核原语。
+## 架构红线（改动前必读）
+
+- **main.c 是编排器，不许把安装逻辑写回去**：它只负责"读序列 → 逐个起进程 → 等退出 →
+  失败问重试/关机 → 全成功重启"。新增/调整步骤只动 `steps/` 和序列文件。
+- **步骤程序之间不许互相调用**：只通过 `/config/installer/state`（key=value）交换数据。
+  这样任何一步都能单独重跑、替换、删掉。
+- **步骤程序无参数**：不要设计 `--flag`；可配置项一律走 `/config/leopard-install.conf`
+  （选项文件先加载，state 覆盖它）。
+- **不复制二进制**：`50-packages` 用 xbps 把内核/引导器/用户态装到目标盘；安装器只编排。
+- **挂载 fstype 必须 `fatfs`**：内核 `get_filesystem()` 精确 `strcmp`，`vfat` 会 -EINVAL。
+- **分区节点名不硬编码**：`/dev/<disk>p<N>` 是内核全局分区索引，按「连续 N 个节点扇区数序列」
+  反查起始索引；根分区必须排第 0（`mount_root` 只认索引最低且带启动标记的分区）。
+- **写文件先删后写**：`xapi_WriteFile` 不截断；探测存在性用 `xapi_ReadFile` 读 1 字节，
+  不要用 `xapi_OpenFile/CloseFile`（整文件读-改-写）。
+- **包名用实名**：`poweroff`、`initctl`、`xbps`（与仓库目录名不同）。
+- 不新增内核 syscall、不改 `OpenXSKernel`；只用既有原语（`SYS_MOUNT`/`SYS_UMOUNT2`/`SYS_WAIT4`/`SYS_SYNC`…）。
+
+## 状态键（步骤间契约）
+
+见 `README.md` 表格：`disk`、`scheme`、`part.*`、`mounted.*`、`init`、`boot.marker`、`auto`。
+新增键请同时更新 README。
+
+## 构建 / 打包
+
+    python3 gen_ninja.py && ninja build   # → out/leopard-installer.elf + out/steps/*.elf
+    ninja pack                            # → 一个 xbps 包含编排器 + 全部步骤 + 两份配置
+
+- 静态 ELF，依赖 `../leopard-sdk`（`include/` 头 + `obj-tui/` 预编译运行时对象 + `liballoc`）。
+- 链接固定 `-Ttext=0x200000`。

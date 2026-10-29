@@ -1,15 +1,66 @@
 # leopard-installer
 
-LeopardOS 安装器（CLI，Debian 式）。在 live 环境运行（initrc 尾端代替 getty），编排现成工具：
+LeopardOS 安装器（CLI，Debian 式）。**序列编排器 + 多可执行文件步骤程序**：
 
-1. 列磁盘 + 选目标盘
-2. lpdisk 分区（GPT，单分区 ef00）
-3. mkfs-fat32 格式化
-4. SYS_MOUNT 挂载到 /mnt
-5. xbps-install -r /mnt -R /media 装基础系统
-6. 重启
+```
+main.c                                  编排器：读序列文件，按序跑步骤程序，全成功则重启
+steps/*.c                               每个安装步骤一个独立可执行文件
+data/leopard-install-sequence.conf      步骤清单（全路径，行序=执行顺序）
+data/leopard-install.conf               安装选项（auto / disk / scheme / init …）
+```
 
-## 安装
+步骤程序之间**互不调用**，只通过 `/config/installer/state`（key=value）交换数据，
+所以任何一步都能单独替换、重排、重跑。想改安装流程不用改 C 代码，改序列文件即可。
 
-- 二进制：/apps/system/leopard-installer.elf
-- 打包：ninja pack -> leopard-installer-1.0_1.x86_64.xbps
+## 步骤
+
+| id | 程序 | 做什么 | 产出状态 |
+|---|---|---|---|
+| `10-disk` | `steps/10-disk.elf` | 列块设备、选目标盘 | `disk`、`disk.sectors` |
+| `20-partition` | `steps/20-partition.elf` | 建 GPT：自动三分区 / 自定义 | `scheme`、`part.count`、`part.N.*` |
+| `30-format` | `steps/30-format.elf` | `mkfs-fat32` 每个分区 | `part.N.formatted` |
+| `40-mount` | `steps/40-mount.elf` | 挂到 `/mnt` 与 `/mnt/<mount>` | `mounted.count`、`mounted.N.*` |
+| `50-packages` | `steps/50-packages.elf` | `xbps-install -r /mnt -R /media` | — |
+| `60-config` | `steps/60-config.elf` | 写 `system/config/fstab`、`system/boot.conf` | — |
+| `70-bootloader` | `steps/70-bootloader.elf` | 校验 `EFI/BOOT/BOOTX64.EFI`、`system/kernel.krl` | `boot.marker` |
+| `80-verify` | `steps/80-verify.elf` | 整体校验（启动标记 / PID1 / initrc / 配置） | — |
+| `90-finish` | `steps/90-finish.elf` | `sync` + 逆序 `umount`（重启由编排器做） | — |
+
+## 分区方案
+
+- `scheme=auto`（默认）：可用区三等分、1 MiB 对齐 → `ESP`(根) / `apps` / `users`；
+- `scheme=custom`：逐分区给挂载点与大小（MiB），可挂任意目录。
+  **第一个分区必须是 `/`**：内核 `mount_root` 只认全局索引最低、且同时含
+  `EFI/BOOT/BOOTX64.EFI` 与 `system/kernel.krl` 的分区。
+
+节点名不硬编码：`/dev/<disk>p<N>` 是内核的**全局分区索引**，所以 rescan 后按
+「连续 N 个节点的扇区数序列」反查起始索引，fstab 里写的也是探测到的真名。
+
+## 安装位置
+
+- 编排器：`/apps/system/leopard-installer.elf`（live 的 `system/config/initrc` 尾端调用它）
+- 步骤程序：`/apps/leopard/installer/steps/<id>.elf`
+- 序列 / 选项：`/config/leopard-install-sequence.conf`、`/config/leopard-install.conf`
+
+## 构建 / 打包
+
+```bash
+python3 gen_ninja.py && ninja build   # → out/leopard-installer.elf + out/steps/*.elf
+ninja pack                            # → out/leopard-installer-1.1_1.x86_64.xbps
+```
+
+包内含编排器、9 个步骤程序与两份配置。`ninja pack` 需要 `xbps-create`（live 环境或 SDK 里自带）。
+
+## 无人值守
+
+在 live 的 `/config/leopard-install.conf` 里写：
+
+```
+auto=1
+disk=sata0
+scheme=auto
+```
+
+之后整个序列不再提问（步骤程序读不到 `auto=1` 就按交互模式走）。
+
+> 代码尚未经过编译器验证：开发机原本没有 clang/ninja/qemu，也还没有 WSL 环境。
