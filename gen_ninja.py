@@ -54,7 +54,7 @@ LIBALLOC = OBJ / "liballoc-x86_64.a"
 
 PKG = {
     "pkgname": "leopard-installer",
-    "pkgver":  "1.1_1",
+    "pkgver":  "1.1.1_1",
     "arch":    "x86_64",
     "desc":    "Leopard installer (sequencer + step programs)",
     "deps":    "",
