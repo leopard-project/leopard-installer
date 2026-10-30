@@ -75,7 +75,7 @@ int main(int argc, char *argv[], char *envp[])
         (void)argv;
         (void)envp;
 
-        li_step_begin("生成 fstab / boot.conf");
+        li_step_begin("Generate fstab / boot.conf");
 
         count = li_state_get_int("part.count", 0);
         if (count <= 0) return li_step_end(li_fail("no partition in state", 0));

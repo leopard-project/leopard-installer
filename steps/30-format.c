@@ -23,7 +23,7 @@ int main(int argc, char *argv[], char *envp[])
         (void)argv;
         (void)envp;
 
-        li_step_begin("格式化 FAT32");
+        li_step_begin("Format FAT32");
 
         count = li_state_get_int("part.count", 0);
         if (count <= 0)
@@ -37,7 +37,7 @@ int main(int argc, char *argv[], char *envp[])
 
                 if (node == NULL) return li_step_end(li_fail("partition has no device node", i));
 
-                xapi_Printf("  mkfs /dev/%s（卷标 %s）\n", node, label);
+                xapi_Printf("  mkfs /dev/%s (label %s)\n", node, label);
                 mkfs_argv[0] = (char *)"mkfs-fat32";
                 mkfs_argv[1] = (char *)node;
                 mkfs_argv[2] = (char *)label;

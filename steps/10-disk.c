@@ -17,7 +17,7 @@ static const char *CANDIDATES[] = {
 
 static void print_disks(void)
 {
-        xapi_Printf("可用磁盘：\n");
+        xapi_Printf("Available disks:\n");
         for (int i = 0; CANDIDATES[i] != NULL; i++) {
                 uint64_t sectors = li_dev_sectors(CANDIDATES[i]);
 
@@ -37,7 +37,7 @@ int main(int argc, char *argv[], char *envp[])
         (void)argv;
         (void)envp;
 
-        li_step_begin("选择目标磁盘");
+        li_step_begin("Select target disk");
         print_disks();
 
         prev     = li_state_get("disk");
@@ -47,8 +47,8 @@ int main(int argc, char *argv[], char *envp[])
         if (!li_is_auto()) {
                 char answer[32];
 
-                if (disk[0] != '\0') xapi_Printf("当前目标：/dev/%s（回车保持不变）\n", disk);
-                if (li_ask("目标磁盘（如 sata0）：", answer, sizeof(answer)) == 0 && answer[0] != '\0')
+                if (disk[0] != '\0') xapi_Printf("Current target: /dev/%s (Enter to keep)\n", disk);
+                if (li_ask("Target disk (e.g. sata0): ", answer, sizeof(answer)) == 0 && answer[0] != '\0')
                         snprintf(disk, sizeof(disk), "%s", answer);
         }
 

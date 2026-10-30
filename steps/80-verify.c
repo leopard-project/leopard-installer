@@ -12,12 +12,12 @@ typedef struct {
 } check_t;
 
 static const check_t CHECKS[] = {
-        { "EFI/BOOT/BOOTX64.EFI",          "引导器（OpenXSBoot）" },
-        { "system/kernel.krl",             "内核（OpenXSKernel）" },
-        { "system/leopard/leopard-rc.elf", "PID1（leopard-rc）" },
-        { "system/config/initrc",          "启动服务表（leopard-base）" },
-        { "system/config/fstab",           "挂载表（60-config）" },
-        { "system/boot.conf",              "启动参数（60-config）" },
+        { "EFI/BOOT/BOOTX64.EFI",          "bootloader (OpenXSBoot)" },
+        { "system/kernel.krl",             "kernel (OpenXSKernel)" },
+        { "system/leopard/leopard-rc.elf", "PID1 (leopard-rc)" },
+        { "system/config/initrc",          "service table (leopard-base)" },
+        { "system/config/fstab",           "fstab (60-config)" },
+        { "system/boot.conf",              "boot parameters (60-config)" },
         { NULL, NULL }
 };
 
@@ -29,7 +29,7 @@ int main(int argc, char *argv[], char *envp[])
         (void)argv;
         (void)envp;
 
-        li_step_begin("整体校验");
+        li_step_begin("Overall verification");
 
         for (int i = 0; CHECKS[i].rel != NULL; i++) {
                 char path[LI_PATH_LEN];
@@ -46,6 +46,6 @@ int main(int argc, char *argv[], char *envp[])
 
         if (missing != 0) return li_step_end(li_fail("required files missing", missing));
 
-        xapi_Printf("\n目标系统关键文件齐全，可以重启。\n");
+        xapi_Printf("\nAll critical target-system files present; ready to reboot.\n");
         return li_step_end(0);
 }

@@ -42,7 +42,7 @@ int main(int argc, char *argv[], char *envp[])
         (void)argv;
         (void)envp;
 
-        li_step_begin("挂载目标文件系统");
+        li_step_begin("Mount target filesystems");
 
         count = li_state_get_int("part.count", 0);
         if (count <= 0) return li_step_end(li_fail("no partition in state", 0));

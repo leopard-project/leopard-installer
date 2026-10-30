@@ -48,10 +48,10 @@ int main(int argc, char *argv[], char *envp[])
         (void)argv;
         (void)envp;
 
-        li_step_begin("安装软件包");
+        li_step_begin("Install packages");
 
         if (install_set(CORE_PACKAGES, "core") != 0)
-                return li_step_end(li_fail("core packages incomplete — check /media .xbps 与 x86_64-repodata", 0));
+                return li_step_end(li_fail("core packages incomplete — check /media .xbps and x86_64-repodata", 0));
 
         if (install_set(EXTRA_PACKAGES, "extra") != 0)
                 li_log("WARNING: optional packages incomplete; the system can still boot");

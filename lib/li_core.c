@@ -120,7 +120,7 @@ int li_state_save(void)
         size_t      used;
 
         used = (size_t)snprintf(text, sizeof(text),
-                                "# LeopardOS installer state (key=value) — 由安装步骤程序写入\n");
+                                "# LeopardOS installer state (key=value) — written by installer step programs\n");
         for (int i = 0; i < s_count && used + 8 < sizeof(text); i++) {
                 int n = snprintf(text + used, sizeof(text) - used, "%s=%s\n", s_key[i], s_val[i]);
                 if (n <= 0) break;

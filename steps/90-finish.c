@@ -16,7 +16,7 @@ int main(int argc, char *argv[], char *envp[])
         (void)argv;
         (void)envp;
 
-        li_step_begin("落盘 / 卸载");
+        li_step_begin("Flush / unmount");
 
         enter_syscall(SYS_SYNC, 0, 0, 0, 0, 0, 0);
         li_log("sync requested");

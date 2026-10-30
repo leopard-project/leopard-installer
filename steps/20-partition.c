@@ -146,7 +146,7 @@ static int ask_custom_layout(void)
         if (count <= 0) {
                 char answer[16];
 
-                if (li_ask("分区数量（1-8）：", answer, sizeof(answer)) != 0) return -1;
+                if (li_ask("Number of partitions (1-8): ", answer, sizeof(answer)) != 0) return -1;
                 count = atoi(answer);
                 if (count <= 0 || count > LI_MAX_PARTS) return -1;
         }
@@ -158,22 +158,22 @@ static int ask_custom_layout(void)
                 char     answer[32];
                 uint64_t size_sect;
 
-                xapi_Printf("\n分区 %d / %d（剩余 %llu MiB）\n", i + 1, count,
+                xapi_Printf("\nPartition %d / %d (%llu MiB remaining)\n", i + 1, count,
                             (unsigned long long)((last - cursor + 1) * LI_SECTOR / 1024 / 1024));
                 if (i == 0) {
                         snprintf(s_parts[0].mount, sizeof(s_parts[0].mount), "/");
-                        xapi_Printf("  挂载点固定为 /（根分区，必须带启动标记）\n");
+                        xapi_Printf("  Mount point fixed to / (root partition, must carry boot flag)\n");
                 } else {
-                        if (li_ask("  挂载点（如 /apps、/users，留空结束）：", answer, sizeof(answer)) != 0)
+                        if (li_ask("  Mount point (e.g. /apps, /users; empty to finish): ", answer, sizeof(answer)) != 0)
                                 return -1;
                         snprintf(s_parts[i].mount, sizeof(s_parts[i].mount), "%s", answer);
                         if (answer[0] == '\0') break;
                 }
 
-                if (li_ask("  大小（MiB）：", answer, sizeof(answer)) != 0) return -1;
+                if (li_ask("  Size (MiB): ", answer, sizeof(answer)) != 0) return -1;
                 size_sect = (uint64_t)atoi(answer) * 1024 * 1024 / LI_SECTOR;
                 if (size_sect < LI_MIN_SECT || cursor + size_sect - 1 > last) {
-                        xapi_Printf("  大小非法或超出剩余空间\n");
+                        xapi_Printf("  Invalid size or exceeds remaining space\n");
                         return -1;
                 }
 
@@ -297,7 +297,7 @@ int main(int argc, char *argv[], char *envp[])
         (void)argv;
         (void)envp;
 
-        li_step_begin("建立分区表");
+        li_step_begin("Create partition table");
 
         disk = li_state_get("disk");
         if (disk == NULL || disk[0] == '\0')
@@ -313,8 +313,8 @@ int main(int argc, char *argv[], char *envp[])
         if (!li_is_auto() && !li_state_is("scheme", "custom")) {
                 char answer[8];
 
-                xapi_Printf("分区方案：1) 自动三分区（ESP/apps/users）  2) 自定义\n");
-                if (li_ask("选择 [1]：", answer, sizeof(answer)) != 0) return li_step_end(1);
+                xapi_Printf("Partition scheme: 1) auto 3-part (ESP/apps/users)  2) custom\n");
+                if (li_ask("Choice [1]: ", answer, sizeof(answer)) != 0) return li_step_end(1);
                 if (answer[0] == '2') scheme = "custom";
         }
 

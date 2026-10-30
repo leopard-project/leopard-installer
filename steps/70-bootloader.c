@@ -18,7 +18,7 @@ static int check_file(const char *rel, const char *who)
                 xapi_Printf("  OK      %s\n", path);
                 return 0;
         }
-        xapi_Printf("  MISSING %s  (来自 %s 包)\n", path, who);
+        xapi_Printf("  MISSING %s  (from %s package)\n", path, who);
         li_log("missing %s (%s)", path, who);
         return 1;
 }
@@ -31,14 +31,14 @@ int main(int argc, char *argv[], char *envp[])
         (void)argv;
         (void)envp;
 
-        li_step_begin("校验引导文件");
+        li_step_begin("Verify boot files");
 
         missing += check_file("EFI/BOOT/BOOTX64.EFI", "OpenXSBoot");
         missing += check_file("system/kernel.krl", "OpenXSKernel");
 
         if (missing != 0) {
-                xapi_Printf("\n引导文件不全，装出来的盘无法启动。\n"
-                            "检查 live 介质的 /media 是否含 OpenXSBoot 与 OpenXSKernel 两个包。\n");
+                xapi_Printf("\nBoot files incomplete; the installed disk will not boot.\n"
+                            "Check that live media /media contains both OpenXSBoot and OpenXSKernel packages.\n");
                 return li_step_end(li_fail("boot markers incomplete", missing));
         }
 
