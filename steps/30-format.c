@@ -58,11 +58,17 @@ int main(int argc, char *argv[], char *envp[])
                         if (li_read_text(uuid_path, uuid_text, sizeof(uuid_text)) == 0) {
                                 char *eq = strchr(uuid_text, '=');
                                 char *nl = strchr(uuid_text, '\n');
+                                char *mount = field(i, "mount", key, sizeof(key), NULL);
 
                                 if (eq != NULL) {
+                                        char uuid_key[40];
                                         *eq++ = '\0';
                                         if (nl != NULL) *nl = '\0';
-                                        li_state_set("part.root.uuid", eq);
+                                        snprintf(uuid_key, sizeof(uuid_key), "part.%d.uuid", i);
+                                        li_state_set(uuid_key, eq);
+                                        /* 只有根分区的 UUID 用于 root.bin */
+                                        if (mount != NULL && strcmp(mount, "/") == 0)
+                                                li_state_set("part.root.uuid", eq);
                                 }
                                 xapi_DeleteFile((WSTR)uuid_path);
                         }
