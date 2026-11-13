@@ -219,7 +219,8 @@ static void shutdown_now(void)
 {
         /* 关机；电源动作失败则挂起，避免继续安装 */
         xapi_Printf("installer: shutting down...\n");
-        xapi_PowerAction(XPOWER_SHUTDOWN);
+        int64_t rc = (int64_t)xapi_PowerAction(XPOWER_SHUTDOWN);
+        if (rc != 0) xapi_Printf("installer: power action failed rc=%lld\n", (long long)rc);
         for (;;)
                 xapi_Sleep(1000);
 }
@@ -228,7 +229,8 @@ static void reboot_now(void)
 {
         /* 重启；电源动作失败则挂起 */
         xapi_Printf("installer: rebooting...\n");
-        xapi_PowerAction(XPOWER_REBOOT);
+        int64_t rc = (int64_t)xapi_PowerAction(XPOWER_REBOOT);
+        if (rc != 0) xapi_Printf("installer: power action failed rc=%lld\n", (long long)rc);
         for (;;)
                 xapi_Sleep(1000);
 }
