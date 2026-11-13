@@ -16,7 +16,7 @@ static const char *CORE_PACKAGES[] = {
 };
 
 static const char *EXTRA_PACKAGES[] = {
-        "leopard-utils", NULL
+        "leopard-utils", "leopard-coreutils", NULL
 };
 
 static int install_set(const char *const *pkgs, const char *set_name)
