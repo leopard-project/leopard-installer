@@ -46,6 +46,7 @@ GPT，两块：
 - 默认 `scheme=ext4`：ESP 64 MiB FAT32 + ext4 root（两块）。
 - 保留 `scheme=fat32`：当前三分区（root/apps/users 全 FAT32）作为兼容/调试路径。
 - 引导相关文件只放 ESP；系统树只放 ext4 root。
+- **ESP 固定挂到 `/boot`**（不引入 `/boot/efi`）：引导器只认 ESP 根，`/boot` 就是它。
 - `/system/config/permissions.conf`、`initrc` 等仍在 root 的 `/system/config`（ext4）。
 
 ## 3. 用户态改动（本仓库与 leopard-utils / base / os）
