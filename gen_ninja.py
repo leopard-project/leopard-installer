@@ -49,12 +49,13 @@ ORCH_INSTALL = "apps/system/leopard-installer.elf"
 STEP_INSTALL = "apps/leopard/installer/steps"
 
 # XACT 2026v5 官方运行时（obj-tui/ 由 leopard-sdk 铺装）
-RUNTIME  = ["arch/x86_64/crt0.S.o", "libsys.cpp.o", "constart.cpp.o",
+RUNTIME  = ["arch/x86_64/crt0.S.o", "libsys.cpp.o",
             "xtuiapi.cpp.o", "krlibc.cpp.o", "string.cpp.o", "stdlib.cpp.o",
             "stdio.cpp.o", "unistd.cpp.o", "errno.cpp.o", "posix_ret.cpp.o",
             "ctype.cpp.o", "permissions.cpp.o", "posix_fs.cpp.o",
             "posix_time.cpp.o", "posix_ioctl.cpp.o"]
 LIBALLOC = OBJ / "liballoc-x86_64.a"
+CRT      = SDK / "obj-extra" / "constart.cpp.o"  # Leopard CRT（替换官方 constart）
 
 PKG = {
     "pkgname": "leopard-installer",
@@ -117,7 +118,7 @@ def main():
     # 编排器：main.c 自己完成输入/等待/重启，不链接 steps 的公共库
     orch_target = OUT / "leopard-installer.elf"
     orch_objs   = [obj_for("main.c")]
-    ins = [OBJ / n for n in RUNTIME] + orch_objs + [LIBALLOC]
+    ins = [OBJ / n for n in RUNTIME] + [CRT] + orch_objs + [LIBALLOC]
     L += [f"build {esc(orch_target)}: link {' '.join(esc(o) for o in ins)}", ""]
 
     # 步骤程序：每个都链接公共库
@@ -125,7 +126,7 @@ def main():
     for step_id, src in STEPS:
         target = OUT / "steps" / f"{step_id}.elf"
         objs   = [obj_for(src)]
-        ins = [OBJ / n for n in RUNTIME] + common_objs + objs + [LIBALLOC]
+        ins = [OBJ / n for n in RUNTIME] + [CRT] + common_objs + objs + [LIBALLOC]
         L += [f"build {esc(target)}: link {' '.join(esc(o) for o in ins)}", ""]
         step_targets.append(target)
 
