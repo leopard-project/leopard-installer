@@ -23,6 +23,8 @@ typedef struct {
         char     name[24];
         char     label[16];
         char     mount[32];
+        char     type_code[8];
+        char     fs[8];
         uint64_t start;
         uint64_t end;
 } part_t;
@@ -52,6 +54,8 @@ static void default_labels(void)
                 snprintf(s_parts[i].name, sizeof(s_parts[i].name), "%s", names[i]);
                 snprintf(s_parts[i].label, sizeof(s_parts[i].label), "%s", labels[i]);
                 snprintf(s_parts[i].mount, sizeof(s_parts[i].mount), "%s", mounts[i]);
+                snprintf(s_parts[i].type_code, sizeof(s_parts[i].type_code), "%s", i == 0 ? "ef00" : "8300");
+                snprintf(s_parts[i].fs, sizeof(s_parts[i].fs), "fatfs");
         }
 }
 
@@ -81,6 +85,46 @@ static int auto_layout(void)
         s_parts[2].start = s_parts[1].end + 1;
         s_parts[2].end   = last;
         s_count          = 3;
+        return 0;
+}
+
+/* 上游新方案：独立 ESP（FAT32，64 MiB）+ ext4 根，其余目录都在根内。 */
+static int ext4_layout(void)
+{
+        uint64_t first = LI_ALIGN;
+        uint64_t last  = s_total - LI_GPT_TAIL;
+        uint64_t esp   = 64ULL * 1024 * 1024 / LI_SECTOR;
+
+        if (last <= first) return -1;
+        if (esp < LI_MIN_SECT) esp = LI_MIN_SECT;
+        if (first + esp > last) return -1;
+        if (last - (first + esp) + 1 < LI_MIN_SECT) return -1;
+
+        snprintf(s_parts[0].name, sizeof(s_parts[0].name), "ESP");
+        snprintf(s_parts[0].label, sizeof(s_parts[0].label), "LP-ESP");
+        snprintf(s_parts[0].mount, sizeof(s_parts[0].mount), "/boot");
+        snprintf(s_parts[0].type_code, sizeof(s_parts[0].type_code), "ef00");
+        snprintf(s_parts[0].fs, sizeof(s_parts[0].fs), "fatfs");
+        s_parts[0].start = first;
+        s_parts[0].end   = first + esp - 1;
+
+        snprintf(s_parts[1].name, sizeof(s_parts[1].name), "root");
+        snprintf(s_parts[1].label, sizeof(s_parts[1].label), "LEOPARD");
+        snprintf(s_parts[1].mount, sizeof(s_parts[1].mount), "/");
+        snprintf(s_parts[1].type_code, sizeof(s_parts[1].type_code), "8300");
+        snprintf(s_parts[1].fs, sizeof(s_parts[1].fs), "ext4");
+        s_parts[1].start = first + esp;
+        s_parts[1].end   = last;
+        /* ext4 formatter requires a 4 KiB-aligned extent. */
+        {
+                uint64_t root_sectors = s_parts[1].end - s_parts[1].start + 1;
+
+                root_sectors &= ~7ULL;
+                if (root_sectors == 0) return -1;
+                s_parts[1].end = s_parts[1].start + root_sectors - 1;
+        }
+
+        s_count = 2;
         return 0;
 }
 
@@ -209,15 +253,43 @@ static int write_table(void)
 
         for (int i = 0; i < s_count; i++) {
                 char start_s[24], end_s[24];
+                char guid_path[40];
+                char guid_text[160];
                 char *add_argv[] = { (char *)"lpdisk", (char *)"add", s_disk, start_s, end_s,
-                                     (char *)"--type", (char *)"ef00",
-                                     (char *)"--name", (char *)s_parts[i].name, NULL };
+                                     (char *)"--type", s_parts[i].type_code,
+                                     (char *)"--name", s_parts[i].name,
+                                     (char *)"--guid-out", guid_path, NULL };
 
                 snprintf(start_s, sizeof(start_s), "%llu", (unsigned long long)s_parts[i].start);
                 snprintf(end_s, sizeof(end_s), "%llu", (unsigned long long)s_parts[i].end);
+                snprintf(guid_path, sizeof(guid_path), "/tmp/part%d.guid", i);
                 if (li_run_tool("lpdisk.elf", add_argv) != 0) {
                         li_log("lpdisk add failed at partition %d", i);
                         return 1;
+                }
+                guid_text[0] = '\0';
+                if (li_read_text(guid_path, guid_text, sizeof(guid_text)) == 0) {
+                        char key[40];
+                        char *line = guid_text;
+
+                        while (*line != '\0') {
+                                char *eol = strchr(line, '\n');
+                                char *value = strchr(line, '=');
+
+                                if (eol != NULL) *eol = '\0';
+                                if (value != NULL) {
+                                        *value++ = '\0';
+                                        if (strcmp(line, "disk") == 0) {
+                                                li_state_set("disk.guid", value);
+                                        } else if (strcmp(line, "part") == 0) {
+                                                snprintf(key, sizeof(key), "part.%d.guid", i);
+                                                li_state_set(key, value);
+                                        }
+                                }
+                                if (eol == NULL) break;
+                                line = eol + 1;
+                        }
+                        xapi_DeleteFile((WSTR)guid_path);
                 }
         }
 
@@ -278,6 +350,12 @@ static int store_state(int base)
                 li_state_set(key, s_parts[i].mount);
                 snprintf(key, sizeof(key), "part.%d.node", i);
                 li_state_set(key, node);
+                snprintf(key, sizeof(key), "part.%d.fs", i);
+                li_state_set(key, s_parts[i].fs);
+                snprintf(key, sizeof(key), "part.%d.type", i);
+                li_state_set(key, s_parts[i].type_code);
+                if (strcmp(s_parts[i].mount, "/boot") == 0) li_state_set("esp.node", node);
+                if (strcmp(s_parts[i].mount, "/") == 0) li_state_set("root.node", node);
 
                 li_log("partition %d: %s LBA %llu..%llu label=%s mount=%s node=/dev/%s", i,
                        s_parts[i].name, (unsigned long long)s_parts[i].start,
@@ -308,14 +386,19 @@ int main(int argc, char *argv[], char *envp[])
         if (s_total == 0) return li_step_end(li_fail("cannot read disk size", 0));
 
         scheme = li_state_get("scheme");
-        if (scheme == NULL || scheme[0] == '\0') scheme = "auto";
+        if (scheme == NULL || scheme[0] == '\0') scheme = "ext4";
 
         if (!li_is_auto() && !li_state_is("scheme", "custom")) {
                 char answer[8];
 
-                xapi_Printf("Partition scheme: 1) auto 3-part (ESP/apps/users)  2) custom\n");
+                xapi_Printf("Partition scheme:\n");
+                xapi_Printf("  1) ext4: ESP (FAT32, 64 MiB) + ext4 root [default]\n");
+                xapi_Printf("  2) fat32: 3-part (root/apps/users)\n");
+                xapi_Printf("  3) custom\n");
                 if (li_ask("Choice [1]: ", answer, sizeof(answer)) != 0) return li_step_end(1);
-                if (answer[0] == '2') scheme = "custom";
+                if (answer[0] == '2') scheme = "fat32";
+                else if (answer[0] == '3') scheme = "custom";
+                else scheme = "ext4";
         }
 
         if (strcmp(scheme, "custom") == 0) {
@@ -327,14 +410,18 @@ int main(int argc, char *argv[], char *envp[])
                                 ? "auto mode: scheme=custom but part.* config missing"
                                 : "custom layout invalid", 0));
                 li_state_set("scheme", "custom");
-        } else {
+        } else if (strcmp(scheme, "fat32") == 0 || strcmp(scheme, "auto") == 0) {
                 if (auto_layout() != 0)
                         return li_step_end(li_fail("disk too small for 3 partitions", 0));
-                li_state_set("scheme", "auto");
+                li_state_set("scheme", "fat32");
+        } else {
+                if (ext4_layout() != 0)
+                        return li_step_end(li_fail("disk too small for ESP + ext4 root", 0));
+                li_state_set("scheme", "ext4");
         }
 
-        /* 根分区必须是第 0 个：mount_root 选全局索引最低、且带启动标记的分区 */
-        if (s_parts[0].mount[0] != '/') {
+        /* 旧 FAT32 方案：根分区必须是第 0 个（mount_root 按标记选最低索引）。 */
+        if (strcmp(li_state_get("scheme"), "ext4") != 0 && s_parts[0].mount[0] != '/') {
                 for (int i = 1; i < s_count; i++) {
                         if (strcmp(s_parts[i].mount, "/") == 0) {
                                 part_t tmp = s_parts[0];

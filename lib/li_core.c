@@ -324,6 +324,38 @@ int li_write_text(const char *path, const char *text)
         return (wrote == 0) ? -1 : 0;
 }
 
+int li_write_binary(const char *path, const void *data, size_t length)
+{
+        uint64_t wrote;
+
+        if (li_file_exists(path)) xapi_DeleteFile((WSTR)path);
+        wrote = xapi_WriteFile((WSTR)path, (char *)data, length, 0);
+        return (wrote == length) ? 0 : -1;
+}
+
+int li_copy_file(const char *src, const char *dst)
+{
+        char    *buffer;
+        uint64_t offset = 0;
+
+        buffer = (char *)malloc(65536);
+        if (buffer == NULL) return -1;
+        if (li_file_exists(dst)) xapi_DeleteFile((WSTR)dst);
+
+        for (;;) {
+                uint64_t got = xapi_ReadFile((WSTR)src, buffer, 65536, offset);
+                uint64_t wrote;
+
+                if (got == 0) break;
+                if (got == (uint64_t)-1) { free(buffer); return -1; }
+                wrote = xapi_WriteFile((WSTR)dst, buffer, got, offset);
+                if (wrote != got) { free(buffer); return -1; }
+                offset += got;
+        }
+        free(buffer);
+        return 0;
+}
+
 int li_make_dirs(const char *path)
 {
         char   buf[LI_PATH_LEN];

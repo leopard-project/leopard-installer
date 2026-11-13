@@ -26,6 +26,8 @@ data/leopard-install.conf           安装选项（auto / disk / scheme / init �
 - **写文件先删后写**：`xapi_WriteFile` 不截断；探测存在性用 `xapi_ReadFile` 读 1 字节，
   不要用 `xapi_OpenFile/CloseFile`（整文件读-改-写）。
 - **包名用实名**：`leopard-utils`（单包，含 poweroff/initctl/lpdisk/mkfs-fat32）、`xbps`（与仓库目录名 `leopard-xbps` 不同）。
+- **安装完成后**：交互模式询问「1) 重启 / 2) 关机」（实体机可在重启前拔掉安装介质）；
+  auto=1 按 `finish=reboot|shutdown` 自动执行，缺省重启，仍然零输入。
 - **auto=1 必须零输入**：任何代码路径都不许在 auto 下阻塞等键盘。`li_ask` 在 auto 返回 -1
   （调用方须回退到 conf 里的 state 值）；`li_confirm` 返回默认值；`main.c` 的失败重试在 auto
   下直接关机（fail-fast），不打印 `[r/s]`。破坏性确认（如 10-disk 的「清盘」）在 auto 下跳过。

@@ -3,7 +3,9 @@
  *
  * 读取 /config/leopard-install-sequence.conf，按顺序逐条执行步骤程序：
  * 每步等待其运行完成再执行下一步。序列文件或步骤程序缺失则关机；
- * 步骤返回非 0 时提示重试或关机；全部成功则重启。
+ * 步骤返回非 0 时提示重试或关机；全部成功后：
+ *   - 交互模式：询问「重启 / 关机」（实体机可先拔掉安装介质再重启）
+ *   - auto=1：按 finish=（reboot|shutdown）自动执行，缺省重启
  * 序列文件格式：每行一个步骤程序的全路径，无参数，# 开头为注释。
  */
 #include "xtuiapi.h"
@@ -15,6 +17,7 @@
 static void shutdown_now(void);
 static void reboot_now(void);
 static int  install_is_auto(void);
+static int  install_finish_is_shutdown(void);
 
 static inline void read_line(char *buf, size_t cap)
 {
@@ -74,6 +77,42 @@ static int install_is_auto(void)
 
         if (st >= 0) return st;
         if (opt >= 0) return opt;
+        return 0;
+}
+
+/* 读 finish= 值；返回 1 = shutdown，0 = reboot（缺省）。 */
+static int install_finish_is_shutdown(void)
+{
+        const char *paths[2] = { "/config/installer/state", "/config/leopard-install.conf" };
+
+        for (int p = 0; p < 2; p++) {
+                XFILE   *fp = xapi_OpenFile((WSTR)paths[p]);
+                char     buf[4096];
+                uint64_t len;
+                uint64_t got;
+                char    *line;
+
+                if (fp == NULL) continue;
+                len = fp->length;
+                if (len >= sizeof(buf)) len = sizeof(buf) - 1;
+                memset(buf, 0, sizeof(buf));
+                got = xapi_ReadFile((WSTR)paths[p], buf, len, 0);
+                xapi_CloseFile(fp);
+                buf[got] = '\0';
+
+                line = buf;
+                while (*line) {
+                        char *nl = strchr(line, '\n');
+                        if (nl) *nl = '\0';
+                        while (*line == ' ' || *line == '\t' || *line == '\r') line++;
+                        if (strncmp(line, "finish=", 7) == 0) {
+                                const char *v = line + 7;
+                                return strcmp(v, "shutdown") == 0 || strcmp(v, "poweroff") == 0;
+                        }
+                        if (!nl) break;
+                        line = nl + 1;
+                }
+        }
         return 0;
 }
 
@@ -148,8 +187,31 @@ next_line:
                 line = nl + 1;
         }
 
-        xapi_Printf("installer: all steps complete. rebooting...\n");
-        reboot_now();
+        xapi_Printf("installer: all steps complete.\n");
+        if (install_is_auto()) {
+                if (install_finish_is_shutdown()) shutdown_now();
+                xapi_Printf("installer: rebooting...\n");
+                reboot_now();
+        }
+
+        /* 交互模式：给用户拔掉安装介质/选择关机的机会。 */
+        for (;;) {
+                char choice[16];
+
+                xapi_Printf("\nInstallation complete.\n");
+                xapi_Printf("  1) Reboot  (remove the installation media first)\n");
+                xapi_Printf("  2) Shut down\n");
+                xapi_Printf("Choice [1]: ");
+                read_line(choice, sizeof(choice));
+
+                if (choice[0] == '2' || choice[0] == 's' || choice[0] == 'S') {
+                        shutdown_now();
+                }
+                if (choice[0] == '\0' || choice[0] == '1' || choice[0] == 'r' || choice[0] == 'R') {
+                        reboot_now();
+                }
+                xapi_Printf("invalid choice\n");
+        }
         return 0;
 }
 

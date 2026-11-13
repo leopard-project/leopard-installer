@@ -21,20 +21,50 @@ static const char *field(int i, const char *name, char *key, size_t cap, const c
         return (value != NULL && value[0] != '\0') ? value : fallback;
 }
 
-static int mount_retry(const char *source, const char *target)
+static int mount_retry(const char *source, const char *target, const char *fstype)
 {
         for (int attempt = 0; attempt < LI_MOUNT_TRIES; attempt++) {
                 int64_t rc = (int64_t)enter_syscall(SYS_MOUNT, (uint64_t)source, (uint64_t)target,
-                                                    (uint64_t)LI_FSTYPE, 0, 0, 0);
+                                                    (uint64_t)fstype, 0, 0, 0);
                 if (rc == 0) return 0;
                 xapi_Sleep(1000); /* 没有真正的 flush，块设备读回可能滞后 */
         }
         return -1;
 }
 
+static int mount_one(int i, int *mounted)
+{
+        char        key[40];
+        const char *node   = field(i, "node", key, sizeof(key), NULL);
+        const char *mount  = field(i, "mount", key, sizeof(key), NULL);
+        const char *fstype = field(i, "fs", key, sizeof(key), "fatfs");
+        char        source[64];
+        char        target[LI_PATH_LEN];
+
+        if (node == NULL || mount == NULL) return 0;
+        if (strcmp(fstype, "ext4") != 0) fstype = LI_FSTYPE;
+
+        snprintf(source, sizeof(source), "/dev/%s", node);
+        if (strcmp(mount, "/") == 0) snprintf(target, sizeof(target), "%s", LI_TARGET);
+        else snprintf(target, sizeof(target), "%s%s", LI_TARGET, mount);
+
+        li_make_dirs(target);
+        if (mount_retry(source, target, fstype) != 0) {
+                li_log("mount %s -> %s failed", source, target);
+                return -1;
+        }
+        xapi_Printf("  %s -> %s (%s)\n", source, target, fstype);
+
+        snprintf(key, sizeof(key), "mounted.%d.target", *mounted);
+        li_state_set(key, target);
+        snprintf(key, sizeof(key), "mounted.%d.source", *mounted);
+        li_state_set(key, source);
+        (*mounted)++;
+        return 0;
+}
+
 int main(int argc, char *argv[], char *envp[])
 {
-        int  count;
         int  mounted = 0;
         char value[32];
 
@@ -44,36 +74,21 @@ int main(int argc, char *argv[], char *envp[])
 
         li_step_begin("Mount target filesystems");
 
-        count = li_state_get_int("part.count", 0);
+        int count = li_state_get_int("part.count", 0);
         if (count <= 0) return li_step_end(li_fail("no partition in state", 0));
 
         li_make_dirs(LI_TARGET);
 
-        for (int i = 0; i < count; i++) {
-                char        key[40];
-                const char *node  = field(i, "node", key, sizeof(key), NULL);
-                const char *mount = field(i, "mount", key, sizeof(key), NULL);
-                char        source[64];
-                char        target[LI_PATH_LEN];
+        /* 先挂根，再挂子目录：ext4 根挂到 /mnt 时不能已经有 /mnt/boot。 */
+        for (int pass = 0; pass < 2; pass++) {
+                for (int i = 0; i < count; i++) {
+                        char        key[40];
+                        const char *mount = field(i, "mount", key, sizeof(key), NULL);
+                        int         is_root = mount != NULL && strcmp(mount, "/") == 0;
 
-                if (node == NULL || mount == NULL) continue;
-
-                snprintf(source, sizeof(source), "/dev/%s", node);
-                if (strcmp(mount, "/") == 0) snprintf(target, sizeof(target), "%s", LI_TARGET);
-                else snprintf(target, sizeof(target), "%s%s", LI_TARGET, mount);
-
-                li_make_dirs(target);
-                if (mount_retry(source, target) != 0) {
-                        li_log("mount %s -> %s failed", source, target);
-                        return li_step_end(1);
+                        if ((pass == 0) != is_root) continue;
+                        if (mount_one(i, &mounted) != 0) return li_step_end(1);
                 }
-                xapi_Printf("  %s -> %s\n", source, target);
-
-                snprintf(key, sizeof(key), "mounted.%d.target", mounted);
-                li_state_set(key, target);
-                snprintf(key, sizeof(key), "mounted.%d.source", mounted);
-                li_state_set(key, source);
-                mounted++;
         }
 
         snprintf(value, sizeof(value), "%d", mounted);

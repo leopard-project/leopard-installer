@@ -67,6 +67,8 @@ uint64_t li_dev_sectors(const char *dev);          /* dev 形如 sata0 / sata0p0
 int      li_file_exists(const char *path);
 int      li_read_text(const char *path, char *out, size_t cap);
 int      li_write_text(const char *path, const char *text);
+int      li_write_binary(const char *path, const void *data, size_t length);
+int      li_copy_file(const char *src, const char *dst);
 int      li_make_dirs(const char *path);
 
 /* ---- 步骤程序样板 ---- */

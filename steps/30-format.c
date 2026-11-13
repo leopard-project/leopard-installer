@@ -23,7 +23,11 @@ int main(int argc, char *argv[], char *envp[])
         (void)argv;
         (void)envp;
 
-        li_step_begin("Format FAT32");
+        {
+                const char *scheme = li_state_get("scheme");
+                li_step_begin((scheme != NULL && strcmp(scheme, "ext4") == 0) ?
+                              "Format ext4 + FAT32" : "Format FAT32");
+        }
 
         count = li_state_get_int("part.count", 0);
         if (count <= 0)
@@ -33,18 +37,43 @@ int main(int argc, char *argv[], char *envp[])
                 char        key[40];
                 const char *node  = field(i, "node", key, sizeof(key), NULL);
                 const char *label = field(i, "label", key, sizeof(key), "LEOPARD");
-                char       *mkfs_argv[4];
+                const char *fs    = field(i, "fs", key, sizeof(key), "fatfs");
 
                 if (node == NULL) return li_step_end(li_fail("partition has no device node", i));
 
-                xapi_Printf("  mkfs /dev/%s (label %s)\n", node, label);
-                mkfs_argv[0] = (char *)"mkfs-fat32";
-                mkfs_argv[1] = (char *)node;
-                mkfs_argv[2] = (char *)label;
-                mkfs_argv[3] = NULL;
-                if (li_run_tool("mkfs-fat32.elf", mkfs_argv) != 0) {
-                        li_log("mkfs-fat32 failed on /dev/%s", node);
-                        return li_step_end(1);
+                if (strcmp(fs, "ext4") == 0) {
+                        char uuid_path[40];
+                        char uuid_text[96];
+                        char *mkfs_argv[] = { (char *)"mkfs-ext4", (char *)node,
+                                              (char *)"--label", (char *)label,
+                                              (char *)"--uuid-out", uuid_path, NULL };
+
+                        snprintf(uuid_path, sizeof(uuid_path), "/tmp/root.uuid");
+                        xapi_Printf("  mkfs.ext4 /dev/%s (label %s)\n", node, label);
+                        if (li_run_tool("mkfs-ext4.elf", mkfs_argv) != 0) {
+                                li_log("mkfs-ext4 failed on /dev/%s", node);
+                                return li_step_end(1);
+                        }
+                        uuid_text[0] = '\0';
+                        if (li_read_text(uuid_path, uuid_text, sizeof(uuid_text)) == 0) {
+                                char *eq = strchr(uuid_text, '=');
+                                char *nl = strchr(uuid_text, '\n');
+
+                                if (eq != NULL) {
+                                        *eq++ = '\0';
+                                        if (nl != NULL) *nl = '\0';
+                                        li_state_set("part.root.uuid", eq);
+                                }
+                                xapi_DeleteFile((WSTR)uuid_path);
+                        }
+                } else {
+                        char *mkfs_argv[] = { (char *)"mkfs-fat32", (char *)node, (char *)label, NULL };
+
+                        xapi_Printf("  mkfs.fat32 /dev/%s (label %s)\n", node, label);
+                        if (li_run_tool("mkfs-fat32.elf", mkfs_argv) != 0) {
+                                li_log("mkfs-fat32 failed on /dev/%s", node);
+                                return li_step_end(1);
+                        }
                 }
 
                 snprintf(key, sizeof(key), "part.%d.formatted", i);
