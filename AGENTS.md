@@ -20,7 +20,10 @@ data/leopard-install.conf           安装选项（auto / disk / scheme / init �
 - **步骤程序无参数**：不要设计 `--flag`；可配置项一律走 `/config/leopard-install.conf`
   （选项文件先加载，state 覆盖它）。
 - **不复制二进制**：`50-packages` 用 xbps 把内核/引导器/用户态装到目标盘；安装器只编排。
-- **挂载 fstype 必须 `fatfs`**：内核 `get_filesystem()` 精确 `strcmp`，`vfat` 会 -EINVAL。
+- **分区方案**：`modern`（默认，ESP+ext4 root+ext4 /users）、`upstream`（ESP+ext4 root）、
+  `leopard-classic`（3×FAT32）、`custom`。旧名 `ext4`→upstream、`fat32`/`auto`→leopard-classic。
+  `upstream`/`modern` 的 ESP 都挂到 `/boot`；`leopard-classic` 没有 `/boot`。
+- **挂载 fstype**：fstab 第三列原样交给内核（`fatfs`/`ext4`）；旧格式缺省回退 `fatfs`。
 - **分区节点名不硬编码**：`/dev/<disk>p<N>` 是内核全局分区索引，按「连续 N 个节点扇区数序列」
   反查起始索引；根分区必须排第 0（`mount_root` 只认索引最低且带启动标记的分区）。
 - **写文件先删后写**：`xapi_WriteFile` 不截断；探测存在性用 `xapi_ReadFile` 读 1 字节，

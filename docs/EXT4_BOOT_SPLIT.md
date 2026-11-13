@@ -43,8 +43,10 @@ GPT，两块：
 
 ## 2. 目标：Leopard 的默认方案
 
-- 默认 `scheme=ext4`：ESP 64 MiB FAT32 + ext4 root（两块）。
-- 保留 `scheme=fat32`：当前三分区（root/apps/users 全 FAT32）作为兼容/调试路径。
+- `scheme=modern`（默认）：ESP 64 MiB FAT32 + ext4 root + ext4 `/users`（三块）。
+- `scheme=upstream`：ESP + ext4 root（两块，对齐 OpenXJ380）；`/users` 留在 root 上。
+- 保留 `scheme=leopard-classic`：旧三分区（root/apps/users 全 FAT32）。
+- `upstream` 与 `modern` 都把 ESP 挂到 `/boot`。
 - 引导相关文件只放 ESP；系统树只放 ext4 root。
 - **ESP 固定挂到 `/boot`**（不引入 `/boot/efi`）：引导器只认 ESP 根，`/boot` 就是它。
 - `/system/config/permissions.conf`、`initrc` 等仍在 root 的 `/system/config`（ext4）。

@@ -47,7 +47,7 @@ int main(int argc, char *argv[], char *envp[])
         li_step_begin("Overall verification");
 
         scheme = li_state_get("scheme");
-        if (scheme != NULL && strcmp(scheme, "ext4") == 0) {
+        if (scheme != NULL && (strcmp(scheme, "upstream") == 0 || strcmp(scheme, "modern") == 0)) {
                 missing += check_at(LI_TARGET, "system/leopard/leopard-rc.elf", "PID1 (leopard-rc)");
                 missing += check_at(LI_TARGET, "system/config/initrc", "service table (leopard-base)");
                 missing += check_at(LI_TARGET, "system/config/fstab", "fstab (60-config)");

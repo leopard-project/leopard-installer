@@ -156,7 +156,7 @@ int main(int argc, char *argv[], char *envp[])
         li_step_begin("Verify boot files");
 
         scheme = li_state_get("scheme");
-        if (scheme != NULL && strcmp(scheme, "ext4") == 0) {
+        if (scheme != NULL && (strcmp(scheme, "upstream") == 0 || strcmp(scheme, "modern") == 0)) {
                 if (publish(LI_TARGET "/EFI/BOOT/BOOTX64.EFI",
                             LI_ESP_ROOT "/EFI/BOOT/BOOTX64.EFI") != 0)
                         return li_step_end(li_fail("publish BOOTX64.EFI to ESP", 0));

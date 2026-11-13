@@ -59,7 +59,7 @@ static void default_labels(void)
         }
 }
 
-static int auto_layout(void)
+static int classic_layout(void)
 {
         uint64_t first;
         uint64_t last;
@@ -88,8 +88,8 @@ static int auto_layout(void)
         return 0;
 }
 
-/* 上游新方案：独立 ESP（FAT32，64 MiB）+ ext4 根，其余目录都在根内。 */
-static int ext4_layout(void)
+/* upstream：ESP（FAT32）+ ext4 根（2 分区），/apps、/users 都在根上。 */
+static int upstream_layout(void)
 {
         uint64_t first = LI_ALIGN;
         uint64_t last  = s_total - LI_GPT_TAIL;
@@ -125,6 +125,61 @@ static int ext4_layout(void)
         }
 
         s_count = 2;
+        return 0;
+}
+
+/* modern（LeopardOS 默认）：ESP + ext4 root + ext4 /users。 */
+static int modern_layout(void)
+{
+        uint64_t first = LI_ALIGN;
+        uint64_t last  = s_total - LI_GPT_TAIL;
+        uint64_t esp   = 64ULL * 1024 * 1024 / LI_SECTOR;
+        uint64_t root_sectors;
+        uint64_t remaining;
+
+        if (last <= first) return -1;
+        if (esp < LI_MIN_SECT) esp = LI_MIN_SECT;
+        if (first + esp > last) return -1;
+        remaining = last - (first + esp) + 1;
+        if (remaining < LI_MIN_SECT * 2) return -1;
+
+        /* root 取 30%，下限 512 MiB；其余给 /users。 */
+        root_sectors = remaining * 30 / 100;
+        if (root_sectors < 512ULL * 1024 * 1024 / LI_SECTOR)
+                root_sectors = 512ULL * 1024 * 1024 / LI_SECTOR;
+        root_sectors &= ~7ULL;
+        if (root_sectors + LI_MIN_SECT > remaining) {
+                if (remaining < LI_MIN_SECT * 2) return -1;
+                root_sectors = ((remaining / 2) & ~7ULL);
+        }
+        if (root_sectors < LI_MIN_SECT) return -1;
+        if (remaining - root_sectors < LI_MIN_SECT) return -1;
+
+        snprintf(s_parts[0].name, sizeof(s_parts[0].name), "ESP");
+        snprintf(s_parts[0].label, sizeof(s_parts[0].label), "LP-ESP");
+        snprintf(s_parts[0].mount, sizeof(s_parts[0].mount), "/boot");
+        snprintf(s_parts[0].type_code, sizeof(s_parts[0].type_code), "ef00");
+        snprintf(s_parts[0].fs, sizeof(s_parts[0].fs), "fatfs");
+        s_parts[0].start = first;
+        s_parts[0].end   = first + esp - 1;
+
+        snprintf(s_parts[1].name, sizeof(s_parts[1].name), "root");
+        snprintf(s_parts[1].label, sizeof(s_parts[1].label), "LEOPARD");
+        snprintf(s_parts[1].mount, sizeof(s_parts[1].mount), "/");
+        snprintf(s_parts[1].type_code, sizeof(s_parts[1].type_code), "8300");
+        snprintf(s_parts[1].fs, sizeof(s_parts[1].fs), "ext4");
+        s_parts[1].start = first + esp;
+        s_parts[1].end   = s_parts[1].start + root_sectors - 1;
+
+        snprintf(s_parts[2].name, sizeof(s_parts[2].name), "users");
+        snprintf(s_parts[2].label, sizeof(s_parts[2].label), "LP-USERS");
+        snprintf(s_parts[2].mount, sizeof(s_parts[2].mount), "/users");
+        snprintf(s_parts[2].type_code, sizeof(s_parts[2].type_code), "8300");
+        snprintf(s_parts[2].fs, sizeof(s_parts[2].fs), "ext4");
+        s_parts[2].start = s_parts[1].end + 1;
+        s_parts[2].end   = last - ((last - s_parts[2].start + 1) & 7);
+
+        s_count = 3;
         return 0;
 }
 
@@ -356,6 +411,7 @@ static int store_state(int base)
                 li_state_set(key, s_parts[i].type_code);
                 if (strcmp(s_parts[i].mount, "/boot") == 0) li_state_set("esp.node", node);
                 if (strcmp(s_parts[i].mount, "/") == 0) li_state_set("root.node", node);
+                if (strcmp(s_parts[i].mount, "/users") == 0) li_state_set("users.node", node);
 
                 li_log("partition %d: %s LBA %llu..%llu label=%s mount=%s node=/dev/%s", i,
                        s_parts[i].name, (unsigned long long)s_parts[i].start,
@@ -386,19 +442,25 @@ int main(int argc, char *argv[], char *envp[])
         if (s_total == 0) return li_step_end(li_fail("cannot read disk size", 0));
 
         scheme = li_state_get("scheme");
-        if (scheme == NULL || scheme[0] == '\0') scheme = "ext4";
+        if (scheme == NULL || scheme[0] == '\0') scheme = "modern";
+        /* 旧名兼容 */
+        if (strcmp(scheme, "ext4") == 0) scheme = "upstream";
+        if (strcmp(scheme, "fat32") == 0 || strcmp(scheme, "auto") == 0)
+                scheme = "leopard-classic";
 
         if (!li_is_auto() && !li_state_is("scheme", "custom")) {
                 char answer[8];
 
                 xapi_Printf("Partition scheme:\n");
-                xapi_Printf("  1) ext4: ESP (FAT32, 64 MiB) + ext4 root [default]\n");
-                xapi_Printf("  2) fat32: 3-part (root/apps/users)\n");
-                xapi_Printf("  3) custom\n");
+                xapi_Printf("  1) modern: ESP (FAT32) + ext4 root + ext4 /users [default]\n");
+                xapi_Printf("  2) upstream: ESP (FAT32) + ext4 root (OpenXJ380 layout)\n");
+                xapi_Printf("  3) leopard-classic: 3x FAT32 (root/apps/users)\n");
+                xapi_Printf("  4) custom\n");
                 if (li_ask("Choice [1]: ", answer, sizeof(answer)) != 0) return li_step_end(1);
-                if (answer[0] == '2') scheme = "fat32";
-                else if (answer[0] == '3') scheme = "custom";
-                else scheme = "ext4";
+                if (answer[0] == '2') scheme = "upstream";
+                else if (answer[0] == '3') scheme = "leopard-classic";
+                else if (answer[0] == '4') scheme = "custom";
+                else scheme = "modern";
         }
 
         if (strcmp(scheme, "custom") == 0) {
@@ -410,18 +472,22 @@ int main(int argc, char *argv[], char *envp[])
                                 ? "auto mode: scheme=custom but part.* config missing"
                                 : "custom layout invalid", 0));
                 li_state_set("scheme", "custom");
-        } else if (strcmp(scheme, "fat32") == 0 || strcmp(scheme, "auto") == 0) {
-                if (auto_layout() != 0)
+        } else if (strcmp(scheme, "leopard-classic") == 0) {
+                if (classic_layout() != 0)
                         return li_step_end(li_fail("disk too small for 3 partitions", 0));
-                li_state_set("scheme", "fat32");
-        } else {
-                if (ext4_layout() != 0)
+                li_state_set("scheme", "leopard-classic");
+        } else if (strcmp(scheme, "upstream") == 0) {
+                if (upstream_layout() != 0)
                         return li_step_end(li_fail("disk too small for ESP + ext4 root", 0));
-                li_state_set("scheme", "ext4");
+                li_state_set("scheme", "upstream");
+        } else {
+                if (modern_layout() != 0)
+                        return li_step_end(li_fail("disk too small for ESP + ext4 root + /users", 0));
+                li_state_set("scheme", "modern");
         }
 
-        /* 旧 FAT32 方案：根分区必须是第 0 个（mount_root 按标记选最低索引）。 */
-        if (strcmp(li_state_get("scheme"), "ext4") != 0 && s_parts[0].mount[0] != '/') {
+        /* leopard-classic：根分区必须是第 0 个（mount_root 按标记选最低索引）。 */
+        if (strcmp(li_state_get("scheme"), "leopard-classic") == 0 && s_parts[0].mount[0] != '/') {
                 for (int i = 1; i < s_count; i++) {
                         if (strcmp(s_parts[i].mount, "/") == 0) {
                                 part_t tmp = s_parts[0];
