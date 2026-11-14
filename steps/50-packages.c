@@ -11,7 +11,7 @@
 
 static const char *CORE_PACKAGES[] = {
         "OpenXSBoot", "OpenXSKernel", "leopard-base", "leopard-rc",
-        "leopard-getty", "leopard-oobe", "leopard-shell", "leopard-mountd",
+        "leopard-getty", "leopard-conhost", "leopard-oobe", "leopard-shell", "leopard-mountd",
         "xbps", NULL
 };
 
