@@ -47,5 +47,5 @@ data/leopard-install.conf           安装选项（auto / disk / scheme / init �
     python3 gen_ninja.py && ninja build   # → out/leopard-installer.elf + out/steps/*.elf
     ninja pack                            # → 一个 xbps 包含编排器 + 全部步骤 + 两份配置
 
-- 静态 ELF，依赖 `../XACT-CRT`（`include/` 头 + `lib/x86_64/` 启动对象、`libxact.a`、`liballoc.a`）。
+- 静态 ELF，依赖 `../XJ380-SDK/out/crt`（`include/` 头 + `lib/x86_64/` 启动对象、`libxact.a`、`liballoc.a`）。
 - 链接固定 `-Ttext=0x200000`。
