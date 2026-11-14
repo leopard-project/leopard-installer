@@ -1,23 +1,28 @@
 # leopard-installer
 
-LeopardOS 安装器（CLI，Debian 式）。**序列编排器 + 多可执行文件步骤程序**：
+LeopardOS 安装器（CLI，Debian 式）。**声明式 InstallPlan + 步骤执行器**：
 
 ```
 main.c                                  编排器：读序列文件，按序跑步骤程序，全成功则重启
-steps/*.c                               每个安装步骤一个独立可执行文件
+include/li_plan.h + lib/li_plan.c       InstallPlan：布局/挂载/模块/收尾的单一真源
+steps/15-plan.c                         解析配置并持久化 InstallPlan（不写盘）
+steps/20-partition.c                    只执行 plan 里的分区，不再重新计算布局
+steps/*.c                               其余步骤消费 plan 产出的 part.* 状态
 data/leopard-install-sequence.conf      步骤清单（全路径，行序=执行顺序）
-data/leopard-install.conf               安装选项（auto / disk / scheme / init …）
+data/leopard-install.conf               安装选项（auto / disk / scheme / modules …）
 ```
 
-步骤程序之间**互不调用**，只通过 `/config/installer/state`（key=value）交换数据，
-所以任何一步都能单独替换、重排、重跑。想改安装流程不用改 C 代码，改序列文件即可。
+15-plan 先把配置解析成 `LiPlan`（disk / scheme / partitions / modules / init / finish），
+写入 state；后续步骤只消费这个 plan，不再各自推导分区。步骤之间仍然只通过
+`/config/installer/state` 交换数据，因此任何一步都能单独替换、重排、重跑。
 
 ## 步骤
 
 | id | 程序 | 做什么 | 产出状态 |
 |---|---|---|---|
 | `10-disk` | `steps/10-disk.elf` | 列块设备、选目标盘 | `disk`、`disk.sectors` |
-| `20-partition` | `steps/20-partition.elf` | 建 GPT：自动三分区 / 自定义 | `scheme`、`part.count`、`part.N.*` |
+| `15-plan` | `steps/15-plan.elf` | 解析 scheme → `LiPlan`，打印并写入 state（不写盘） | `scheme`、`part.count`、`part.N.*`、`plan.modules` |
+| `20-partition` | `steps/20-partition.elf` | 执行 plan：建 GPT、rescan、探测分区节点 | `part.N.node`、`esp/root/users.node` |
 | `30-format` | `steps/30-format.elf` | `mkfs-fat32` 每个分区 | `part.N.formatted` |
 | `40-mount` | `steps/40-mount.elf` | 挂到 `/mnt` 与 `/mnt/<mount>` | `mounted.count`、`mounted.N.*` |
 | `50-packages` | `steps/50-packages.elf` | `xbps-install -r /mnt -R /media` | — |
@@ -46,7 +51,7 @@ data/leopard-install.conf               安装选项（auto / disk / scheme / in
 
 ```bash
 python3 gen_ninja.py && ninja build   # → out/leopard-installer.elf + out/steps/*.elf
-ninja pack                            # → out/leopard-installer-1.1_1.x86_64.xbps
+ninja pack                            # → out/leopard-installer-1.2.0_1.x86_64.xbps
 ```
 
 包内含编排器、9 个步骤程序与两份配置。`ninja pack` 需要 `xbps-create`（live 环境或 SDK 里自带）。

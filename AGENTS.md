@@ -1,20 +1,27 @@
 # PROJECT KNOWLEDGE BASE — leopard-installer
 
-LeopardOS 安装器：**序列编排器（main.c）+ 多可执行文件步骤程序（steps/）**。
+LeopardOS 安装器：**声明式 InstallPlan + 序列执行器**。
 
 ```
 main.c                              编排器：读 /config/leopard-install-sequence.conf，
                                     按行序以「全路径、无参数」执行步骤程序；失败问重试/关机
-steps/NN-*.c                        每个安装步骤一个独立可执行文件
-include/li.h + lib/li_core.c        步骤程序公共库（状态/选项/日志/交互/子进程/块设备）
+include/li_plan.h + lib/li_plan.c    InstallPlan：布局/挂载/模块/收尾的单一真源
+steps/15-plan.c                     解析 scheme 成 LiPlan，打印并写入 state（不写盘）
+steps/20-partition.c                只执行 plan 里的分区；不再自己计算布局
+steps/NN-*.c                        其余步骤消费 plan 产出的 part.* 状态
+include/li.h + lib/li_core.c        步骤公共库（状态/选项/日志/交互/子进程/块设备）
 data/leopard-install-sequence.conf  步骤清单（行序=执行顺序）
-data/leopard-install.conf           安装选项（auto / disk / scheme / init …）
+data/leopard-install.conf           安装选项（auto / disk / scheme / modules / init …）
 ```
 
 ## 架构红线（改动前必读）
 
 - **main.c 是编排器，不许把安装逻辑写回去**：它只负责"读序列 → 逐个起进程 → 等退出 →
   失败问重试/关机 → 全成功重启"。新增/调整步骤只动 `steps/` 和序列文件。
+- **布局只在 15-plan / li_plan.c 计算**：20-partition 只执行 plan；30/40/60 只读
+  plan 写入的 `part.*`。不要在步骤里重新推导 scheme 或分区尺寸。
+- **可选内核模块**：`modules=e1000-kmod,...` 由 LiPlan 记录，50-packages 从 `/media`
+  安装；缺包只告警，不影响基础系统。
 - **步骤程序之间不许互相调用**：只通过 `/config/installer/state`（key=value）交换数据。
   这样任何一步都能单独重跑、替换、删掉。
 - **步骤程序无参数**：不要设计 `--flag`；可配置项一律走 `/config/leopard-install.conf`

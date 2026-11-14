@@ -19,6 +19,33 @@ static const char *EXTRA_PACKAGES[] = {
         "leopard-utils", "leopard-coreutils", NULL
 };
 
+static int install_one(const char *pkg)
+{
+        char *argv[] = { (char *)"xbps-install", (char *)"-y", (char *)"-r", (char *)LI_TARGET,
+                         (char *)"-R", (char *)LI_MEDIA, (char *)pkg, NULL };
+        li_log("xbps-install -r %s -R %s %s", LI_TARGET, LI_MEDIA, pkg);
+        return li_run_tool("xbps-install", argv);
+}
+
+static int install_modules(void)
+{
+        const char *list = li_state_get("plan.modules");
+        if (list == NULL || list[0] == '\0') list = li_state_get("modules");
+        if (list == NULL || list[0] == '\0') return 0;
+
+        char buffer[LI_VAL_LEN];
+        snprintf(buffer, sizeof(buffer), "%s", list);
+        int failed = 0;
+        for (char *item = strtok(buffer, ", \t"); item != NULL; item = strtok(NULL, ", \t")) {
+                if (item[0] == '\0') continue;
+                if (install_one(item) != 0) {
+                        li_log("WARNING: optional module package missing or failed: %s", item);
+                        failed = 1;
+                }
+        }
+        return failed ? 1 : 0;
+}
+
 static int install_set(const char *const *pkgs, const char *set_name)
 {
         char *argv[32];
@@ -55,6 +82,9 @@ int main(int argc, char *argv[], char *envp[])
 
         if (install_set(EXTRA_PACKAGES, "extra") != 0)
                 li_log("WARNING: optional packages incomplete; the system can still boot");
+
+        if (install_modules() != 0)
+                li_log("WARNING: some optional kernel modules were not installed");
 
         return li_step_end(0);
 }
