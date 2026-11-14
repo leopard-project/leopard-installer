@@ -85,12 +85,15 @@ int main(int argc, char *argv[], char *envp[])
         if (install_set(CORE_PACKAGES, "core") != 0)
                 return li_step_end(li_fail("core packages incomplete — check /media .xbps and x86_64-repodata", 0));
 
+        /* 45-packages-select writes plan.packages_selected even for an empty set,
+         * so minimal means minimal instead of silently installing extras. */
         const char *optional = li_state_get("plan.optional_packages");
         if (optional != NULL && optional[0] != '\0') {
                 if (install_list(optional, "profile") != 0)
                         li_log("WARNING: optional profile packages incomplete; the system can still boot");
-        } else if (install_set(EXTRA_PACKAGES, "extra") != 0) {
-                li_log("WARNING: optional packages incomplete; the system can still boot");
+        } else if (li_state_get("plan.packages_selected") == NULL) {
+                if (install_set(EXTRA_PACKAGES, "extra") != 0)
+                        li_log("WARNING: optional packages incomplete; the system can still boot");
         }
 
         if (install_modules() != 0)

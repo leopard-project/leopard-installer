@@ -30,6 +30,7 @@ STEPS = [
     ("20-partition",  "steps/20-partition.c"),
     ("30-format",     "steps/30-format.c"),
     ("40-mount",      "steps/40-mount.c"),
+    ("45-packages-select", "steps/45-packages-select.c"),
     ("50-packages",   "steps/50-packages.c"),
     ("60-config",     "steps/60-config.c"),
     ("70-bootloader", "steps/70-bootloader.c"),
@@ -43,6 +44,7 @@ DATA = [
     ("data/leopard-install.conf",          "config/leopard-install.conf"),
     ("data/install-profiles.conf",         "config/install-profiles.conf"),
     ("data/format-profiles.conf",          "config/format-profiles.conf"),
+    ("data/package-profiles.conf",         "config/package-profiles.conf"),
 ]
 
 ORCH_INSTALL = "apps/system/leopard-installer.elf"
@@ -57,7 +59,7 @@ CRT_LIBS = [LIB / "libxact.a", LIB / "liballoc.a"]
 
 PKG = {
     "pkgname": "leopard-installer",
-    "pkgver":  "1.3.0_1",
+    "pkgver":  "1.4.0_1",
     "arch":    "x86_64",
     "desc":    "Leopard installer (sequencer + step programs)",
     "deps":    "",
