@@ -18,9 +18,6 @@ import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-SDK  = ROOT / ".." / "XJ380-SDK"
-INC  = SDK / "src" / "include"
-OBJ  = SDK / "obj-tui"
 OUT  = ROOT / "out"
 
 # 步骤程序共享的库（状态 / 选项 / 日志 / 交互 / 子进程 / 块设备）
@@ -48,14 +45,12 @@ DATA = [
 ORCH_INSTALL = "apps/system/leopard-installer.elf"
 STEP_INSTALL = "apps/leopard/installer/steps"
 
-# 官方运行时（obj-tui/ 由 XJ380-SDK 构建）
-RUNTIME  = ["arch/x86_64/crt0.S.o", "libsys.cpp.o",
-            "xtuiapi.cpp.o", "krlibc.cpp.o", "string.cpp.o", "stdlib.cpp.o",
-            "stdio.cpp.o", "unistd.cpp.o", "errno.cpp.o", "posix_ret.cpp.o",
-            "ctype.cpp.o", "permissions.cpp.o", "posix_fs.cpp.o",
-            "posix_time.cpp.o", "posix_ioctl.cpp.o"]
-LIBALLOC = OBJ / "liballoc-x86_64.a"
-CRT      = SDK / "obj-extra" / "start.cpp.o"  # 官方 start.cpp：无终端 fork/exec
+# XACT CRT（../XACT-CRT）：Windows 风格启动对象 + 静态运行时 + 分配器
+CRT_ROOT = ROOT / ".." / "XACT-CRT"
+INC      = CRT_ROOT / "include"
+LIB      = CRT_ROOT / "lib" / "x86_64"
+CRT_OBJS = [LIB / "crt0.o", LIB / "start.o"]
+CRT_LIBS = [LIB / "libxact.a", LIB / "liballoc.a"]
 
 PKG = {
     "pkgname": "leopard-installer",
@@ -118,7 +113,7 @@ def main():
     # 编排器：main.c 自己完成输入/等待/重启，不链接 steps 的公共库
     orch_target = OUT / "leopard-installer.elf"
     orch_objs   = [obj_for("main.c")]
-    ins = [OBJ / n for n in RUNTIME] + [CRT] + orch_objs + [LIBALLOC]
+    ins = CRT_OBJS + orch_objs + CRT_LIBS
     L += [f"build {esc(orch_target)}: link {' '.join(esc(o) for o in ins)}", ""]
 
     # 步骤程序：每个都链接公共库
@@ -126,7 +121,7 @@ def main():
     for step_id, src in STEPS:
         target = OUT / "steps" / f"{step_id}.elf"
         objs   = [obj_for(src)]
-        ins = [OBJ / n for n in RUNTIME] + [CRT] + common_objs + objs + [LIBALLOC]
+        ins = CRT_OBJS + common_objs + objs + CRT_LIBS
         L += [f"build {esc(target)}: link {' '.join(esc(o) for o in ins)}", ""]
         step_targets.append(target)
 
