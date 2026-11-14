@@ -27,10 +27,8 @@ static int install_one(const char *pkg)
         return li_run_tool("xbps-install", argv);
 }
 
-static int install_modules(void)
+static int install_list(const char *list, const char *kind)
 {
-        const char *list = li_state_get("plan.modules");
-        if (list == NULL || list[0] == '\0') list = li_state_get("modules");
         if (list == NULL || list[0] == '\0') return 0;
 
         char buffer[LI_VAL_LEN];
@@ -39,11 +37,18 @@ static int install_modules(void)
         for (char *item = strtok(buffer, ", \t"); item != NULL; item = strtok(NULL, ", \t")) {
                 if (item[0] == '\0') continue;
                 if (install_one(item) != 0) {
-                        li_log("WARNING: optional module package missing or failed: %s", item);
+                        li_log("WARNING: optional %s package missing or failed: %s", kind, item);
                         failed = 1;
                 }
         }
         return failed ? 1 : 0;
+}
+
+static int install_modules(void)
+{
+        const char *list = li_state_get("plan.modules");
+        if (list == NULL || list[0] == '\0') list = li_state_get("modules");
+        return install_list(list, "module");
 }
 
 static int install_set(const char *const *pkgs, const char *set_name)
@@ -80,8 +85,13 @@ int main(int argc, char *argv[], char *envp[])
         if (install_set(CORE_PACKAGES, "core") != 0)
                 return li_step_end(li_fail("core packages incomplete — check /media .xbps and x86_64-repodata", 0));
 
-        if (install_set(EXTRA_PACKAGES, "extra") != 0)
+        const char *optional = li_state_get("plan.optional_packages");
+        if (optional != NULL && optional[0] != '\0') {
+                if (install_list(optional, "profile") != 0)
+                        li_log("WARNING: optional profile packages incomplete; the system can still boot");
+        } else if (install_set(EXTRA_PACKAGES, "extra") != 0) {
                 li_log("WARNING: optional packages incomplete; the system can still boot");
+        }
 
         if (install_modules() != 0)
                 li_log("WARNING: some optional kernel modules were not installed");

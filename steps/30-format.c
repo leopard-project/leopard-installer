@@ -6,6 +6,7 @@
  * 输出：part.N.formatted=1
  */
 #include "li.h"
+#include "li_format.h"
 
 static const char *field(int i, const char *name, char *key, size_t cap, const char *fallback)
 {
@@ -41,44 +42,30 @@ int main(int argc, char *argv[], char *envp[])
 
                 if (node == NULL) return li_step_end(li_fail("partition has no device node", i));
 
+                char uuid_path[40];
+                snprintf(uuid_path, sizeof(uuid_path), "/tmp/root.uuid");
+                xapi_Printf("  format /dev/%s as %s (label %s)\n", node, fs, label);
+                if (li_format_run(fs, node, label, strcmp(fs, "ext4") == 0 ? uuid_path : NULL) != 0) {
+                        li_log("format failed on /dev/%s (fs=%s)", node, fs);
+                        return li_step_end(1);
+                }
                 if (strcmp(fs, "ext4") == 0) {
-                        char uuid_path[40];
                         char uuid_text[96];
-                        char *mkfs_argv[] = { (char *)"mkfs-ext4", (char *)node,
-                                              (char *)"--label", (char *)label,
-                                              (char *)"--uuid-out", uuid_path, NULL };
-
-                        snprintf(uuid_path, sizeof(uuid_path), "/tmp/root.uuid");
-                        xapi_Printf("  mkfs.ext4 /dev/%s (label %s)\n", node, label);
-                        if (li_run_tool("mkfs-ext4.elf", mkfs_argv) != 0) {
-                                li_log("mkfs-ext4 failed on /dev/%s", node);
-                                return li_step_end(1);
-                        }
                         uuid_text[0] = '\0';
                         if (li_read_text(uuid_path, uuid_text, sizeof(uuid_text)) == 0) {
                                 char *eq = strchr(uuid_text, '=');
                                 char *nl = strchr(uuid_text, '\n');
-                                char *mount = field(i, "mount", key, sizeof(key), NULL);
-
+                                const char *mount = field(i, "mount", key, sizeof(key), NULL);
                                 if (eq != NULL) {
                                         char uuid_key[40];
                                         *eq++ = '\0';
                                         if (nl != NULL) *nl = '\0';
                                         snprintf(uuid_key, sizeof(uuid_key), "part.%d.uuid", i);
                                         li_state_set(uuid_key, eq);
-                                        /* 只有根分区的 UUID 用于 root.bin */
                                         if (mount != NULL && strcmp(mount, "/") == 0)
                                                 li_state_set("part.root.uuid", eq);
                                 }
                                 xapi_DeleteFile((WSTR)uuid_path);
-                        }
-                } else {
-                        char *mkfs_argv[] = { (char *)"mkfs-fat32", (char *)node, (char *)label, NULL };
-
-                        xapi_Printf("  mkfs.fat32 /dev/%s (label %s)\n", node, label);
-                        if (li_run_tool("mkfs-fat32.elf", mkfs_argv) != 0) {
-                                li_log("mkfs-fat32 failed on /dev/%s", node);
-                                return li_step_end(1);
                         }
                 }
 

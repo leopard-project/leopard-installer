@@ -9,11 +9,14 @@ steps/15-plan.c                         解析配置并持久化 InstallPlan（�
 steps/20-partition.c                    只执行 plan 里的分区，不再重新计算布局
 steps/*.c                               其余步骤消费 plan 产出的 part.* 状态
 data/leopard-install-sequence.conf      步骤清单（全路径，行序=执行顺序）
-data/leopard-install.conf               安装选项（auto / disk / scheme / modules …）
+data/leopard-install.conf               安装选项（auto / disk / profile / modules …）
+data/install-profiles.conf              安装方案：modern / upstream / classic / custom
+data/format-profiles.conf               格式化方案：fatfs / ext4 的工具与参数
 ```
 
-15-plan 先把配置解析成 `LiPlan`（disk / scheme / partitions / modules / init / finish），
-写入 state；后续步骤只消费这个 plan，不再各自推导分区。步骤之间仍然只通过
+15-plan 先把配置解析成 `LiPlan`（disk / profile / partitions / modules / init / finish），
+写入 state；20-partition 只执行 plan，30-format 按 `format-profiles.conf` 选
+formatter，后续步骤只消费 plan 产出的状态。步骤之间仍然只通过
 `/config/installer/state` 交换数据，因此任何一步都能单独替换、重排、重跑。
 
 ## 步骤
@@ -31,10 +34,46 @@ data/leopard-install.conf               安装选项（auto / disk / scheme / mo
 | `80-verify` | `steps/80-verify.elf` | 整体校验（启动标记 / PID1 / initrc / 配置） | — |
 | `90-finish` | `steps/90-finish.elf` | `sync` + 逆序 `umount`（重启由编排器做） | — |
 
-## 分区方案
+## 安装方案（profile）
 
-- `scheme=auto`（默认）：可用区三等分、1 MiB 对齐 → `ESP`(根) / `apps` / `users`；
-- `scheme=custom`：逐分区给挂载点与大小（MiB），可挂任意目录。
+方案定义在 `/config/install-profiles.conf`，每行一个分区：
+
+```
+profile.modern.title=Modern: ESP + ext4 root + ext4 /users
+profile.modern.part.0=ESP|LP-ESP|64M|fatfs|/boot|ef00
+profile.modern.part.1=root|LEOPARD|30%|ext4|/|8300
+profile.modern.part.2=users|LP-USERS|rest|ext4|/users|8300
+profile.modern.packages=leopard-utils,leopard-coreutils
+profile.modern.modules=
+```
+
+- 支持 `64M`、`30%`、`third`、`rest` 尺寸；
+- `profile=` 选择方案，旧 `scheme=` 仍兼容；
+- `modules=` / `optional_packages=` 可覆盖 profile 默认值；
+- `custom` 继续使用 `part.N.mount` + `part.N.size_mb`，第一个分区必须是 `/`。
+
+## 格式化方案（format profile）
+
+`/config/format-profiles.conf`：
+
+```
+format.fatfs.tool=mkfs-fat32.elf
+format.fatfs.args={node} {label}
+format.ext4.tool=mkfs-ext4.elf
+format.ext4.args={node} --label {label} --uuid-out {uuid_out}
+```
+
+`30-format` 只按 `part.N.fs` 查表执行；新增文件系统只需加一段配置。
+
+## 计划失败
+
+15-plan 在交互模式下提供：
+
+```
+[r]etry / [c]hange profile / [s]hutdown
+```
+
+auto 模式仍然 fail-fast，不阻塞等键盘。
   **第一个分区必须是 `/`**：内核 `mount_root` 只认全局索引最低、且同时含
   `EFI/BOOT/BOOTX64.EFI` 与 `system/kernel.krl` 的分区。
 
@@ -51,7 +90,7 @@ data/leopard-install.conf               安装选项（auto / disk / scheme / mo
 
 ```bash
 python3 gen_ninja.py && ninja build   # → out/leopard-installer.elf + out/steps/*.elf
-ninja pack                            # → out/leopard-installer-1.2.0_1.x86_64.xbps
+ninja pack                            # → out/leopard-installer-1.3.0_1.x86_64.xbps
 ```
 
 包内含编排器、9 个步骤程序与两份配置。`ninja pack` 需要 `xbps-create`（live 环境或 SDK 里自带）。

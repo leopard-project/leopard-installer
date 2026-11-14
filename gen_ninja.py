@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parent
 OUT  = ROOT / "out"
 
 # 步骤程序共享的库（状态 / 选项 / 日志 / 交互 / 子进程 / 块设备）
-COMMON_SOURCES = ["lib/li_core.c", "lib/li_plan.c"]
+COMMON_SOURCES = ["lib/li_core.c", "lib/li_plan.c", "lib/li_format.c"]
 
 # 步骤程序：(id, 源文件)。id 同时是产物名和 sequence.conf 里的文件名。
 STEPS = [
@@ -41,6 +41,8 @@ STEPS = [
 DATA = [
     ("data/leopard-install-sequence.conf", "config/leopard-install-sequence.conf"),
     ("data/leopard-install.conf",          "config/leopard-install.conf"),
+    ("data/install-profiles.conf",         "config/install-profiles.conf"),
+    ("data/format-profiles.conf",          "config/format-profiles.conf"),
 ]
 
 ORCH_INSTALL = "apps/system/leopard-installer.elf"
@@ -55,7 +57,7 @@ CRT_LIBS = [LIB / "libxact.a", LIB / "liballoc.a"]
 
 PKG = {
     "pkgname": "leopard-installer",
-    "pkgver":  "1.2.0_1",
+    "pkgver":  "1.3.0_1",
     "arch":    "x86_64",
     "desc":    "Leopard installer (sequencer + step programs)",
     "deps":    "",

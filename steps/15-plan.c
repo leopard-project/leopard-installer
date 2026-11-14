@@ -2,36 +2,48 @@
 /*
  * steps/15-plan.c — resolve the declarative InstallPlan.
  *
- * Input: disk, disk.sectors, scheme (config/state).
- * Output: scheme + part.* + plan.modules/plan.init/plan.finish.
+ * Input: disk, disk.sectors, profile (or legacy scheme).
+ * Output: profile/scheme + part.* + plan.modules/plan.optional_packages.
  * This step is non-destructive: it only resolves and prints the plan.
  */
 #include "li.h"
 #include "li_plan.h"
 
-static const char *choose_scheme(const char *current)
+static int profile_index(char ids[][24], int count, const char *current)
 {
-        if (li_is_auto() || li_state_is("scheme", "custom")) return current;
+        for (int i = 0; i < count; i++)
+                if (current != NULL && strcmp(ids[i], current) == 0) return i;
+        return 0;
+}
 
+static const char *choose_profile(const char *current)
+{
+        static char ids[8][24];
+        static char titles[8][64];
+        int count = li_plan_list_profiles(ids, titles, 8);
+        int selected = profile_index(ids, count, current);
+
+        if (li_is_auto() || count <= 0) return current;
+
+        xapi_Printf("Installation profile:\n");
+        for (int i = 0; i < count; i++)
+                xapi_Printf("  %d) %s\n", i + 1, titles[i]);
         char answer[8];
-        xapi_Printf("Partition scheme:\n");
-        xapi_Printf("  1) modern: ESP (FAT32) + ext4 root + ext4 /users [default]\n");
-        xapi_Printf("  2) upstream: ESP (FAT32) + ext4 root (OpenXJ380 layout)\n");
-        xapi_Printf("  3) leopard-classic: 3x FAT32 (root/apps/users)\n");
-        xapi_Printf("  4) custom\n");
-        if (li_ask("Choice [1]: ", answer, sizeof(answer)) != 0) return current;
-        if (answer[0] == '2') return "upstream";
-        if (answer[0] == '3') return "leopard-classic";
-        if (answer[0] == '4') return "custom";
-        return "modern";
+        xapi_Printf("Choice [%d]: ", selected + 1);
+        if (li_ask("", answer, sizeof(answer)) == 0 && answer[0] >= '1' && answer[0] <= '9') {
+                int choice = answer[0] - '1';
+                if (choice < count) selected = choice;
+        }
+        return ids[selected];
 }
 
 int main(int argc, char *argv[], char *envp[])
 {
         LiPlan plan;
         const char *disk;
-        const char *scheme;
+        const char *profile;
         uint64_t total;
+        int choose = 1;
 
         (void)argc;
         (void)argv;
@@ -46,26 +58,39 @@ int main(int argc, char *argv[], char *envp[])
         if (total == 0) total = li_dev_sectors(disk);
         if (total == 0) return li_step_end(li_fail("cannot read disk size", 0));
 
-        scheme = li_state_get("scheme");
-        if (scheme == NULL || scheme[0] == '\0') scheme = "modern";
-        scheme = choose_scheme(scheme);
-        li_state_set("scheme", scheme);
+        profile = li_state_get("profile");
+        if (profile == NULL || profile[0] == '\0') profile = li_state_get("scheme");
+        if (profile == NULL || profile[0] == '\0') profile = "modern";
 
-        memset(&plan, 0, sizeof(plan));
-        snprintf(plan.disk, sizeof(plan.disk), "%s", disk);
-        plan.total_sectors = total;
+        for (;;) {
+                if (choose) profile = choose_profile(profile);
+                choose = 0;
 
-        int rc = li_plan_build(&plan, disk, total, scheme);
-        if (rc != 0 && strcmp(scheme, "custom") == 0 && !li_is_auto())
-                rc = li_plan_custom_ask(&plan);
-        if (rc != 0)
-                return li_step_end(li_fail(li_is_auto()
-                        ? "auto mode: install plan is incomplete or disk is too small"
-                        : "cannot resolve install plan", 0));
+                li_state_set("profile", profile);
+                li_state_set("scheme", profile);
 
-        li_plan_print(&plan);
-        if (li_plan_store(&plan) != 0)
-                return li_step_end(li_fail("cannot persist install plan", 0));
+                memset(&plan, 0, sizeof(plan));
+                snprintf(plan.disk, sizeof(plan.disk), "%s", disk);
+                plan.total_sectors = total;
 
-        return li_step_end(0);
+                int rc = li_plan_build(&plan, disk, total, profile);
+                if (rc != 0 && strcmp(profile, "custom") == 0 && !li_is_auto())
+                        rc = li_plan_custom_ask(&plan);
+                if (rc == 0) {
+                        li_plan_print(&plan);
+                        if (li_plan_store(&plan) != 0)
+                                return li_step_end(li_fail("cannot persist install plan", 0));
+                        return li_step_end(0);
+                }
+
+                xapi_Printf("installer: plan failed for profile '%s'.\n", profile);
+                if (li_is_auto())
+                        return li_step_end(li_fail("auto mode: install plan is incomplete or disk is too small", 0));
+
+                char choice[8];
+                xapi_Printf("  [r]etry / [c]hange profile / [s]hutdown: ");
+                if (li_ask("", choice, sizeof(choice)) != 0) return li_step_end(1);
+                if (choice[0] == 's' || choice[0] == 'S') return li_step_end(li_fail("cancelled by user", 0));
+                if (choice[0] == 'c' || choice[0] == 'C') choose = 1;
+        }
 }

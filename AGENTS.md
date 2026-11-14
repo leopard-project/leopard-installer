@@ -20,8 +20,15 @@ data/leopard-install.conf           安装选项（auto / disk / scheme / module
   失败问重试/关机 → 全成功重启"。新增/调整步骤只动 `steps/` 和序列文件。
 - **布局只在 15-plan / li_plan.c 计算**：20-partition 只执行 plan；30/40/60 只读
   plan 写入的 `part.*`。不要在步骤里重新推导 scheme 或分区尺寸。
-- **可选内核模块**：`modules=e1000-kmod,...` 由 LiPlan 记录，50-packages 从 `/media`
-  安装；缺包只告警，不影响基础系统。
+- **安装方案来自配置**：`data/install-profiles.conf` 定义 modern / upstream /
+  leopard-classic / custom 的分区、可选包与模块；`profile=` 选择，旧 `scheme=` 兼容。
+  不要在 C 里新增硬编码 scheme。
+- **格式化也来自配置**：`data/format-profiles.conf` 定义 `format.<fstype>.tool/args`；
+  30-format 只按 `part.N.fs` 查表，新增 fstype 不应改 C 分支。
+- **可选包/内核模块**：`modules=` / `optional_packages=` 覆盖 profile 默认值；
+  50-packages 从 `/media` 安装，缺包只告警，不影响基础系统。
+- **计划失败**：交互模式 15-plan 提供 `[r]etry / [c]hange profile / [s]hutdown`；
+  auto 模式 fail-fast，不阻塞键盘。
 - **步骤程序之间不许互相调用**：只通过 `/config/installer/state`（key=value）交换数据。
   这样任何一步都能单独重跑、替换、删掉。
 - **步骤程序无参数**：不要设计 `--flag`；可配置项一律走 `/config/leopard-install.conf`

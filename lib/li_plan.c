@@ -13,6 +13,181 @@
 #define LI_GPT_TAIL  34ULL
 #define LI_MIN_SECT  (16ULL * 1024 * 1024 / LI_SECTOR)
 
+#define LI_PROFILES_PATH "/config/install-profiles.conf"
+
+static char s_profiles[LI_TEXT_CAP];
+static int  s_profiles_loaded;
+
+static void profiles_load(void)
+{
+        if (s_profiles_loaded) return;
+        s_profiles_loaded = 1;
+        uint64_t got = xapi_ReadFile((WSTR)LI_PROFILES_PATH, s_profiles, sizeof(s_profiles) - 1, 0);
+        if (got == 0 || got >= sizeof(s_profiles)) {
+                s_profiles[0] = '\0';
+                return;
+        }
+        s_profiles[got] = '\0';
+}
+
+static int profile_get(const char *id, const char *field, char *out, size_t cap)
+{
+        profiles_load();
+        char text[LI_TEXT_CAP];
+        snprintf(text, sizeof(text), "%s", s_profiles);
+        char key[96];
+        if (id != NULL && id[0] != '\0') snprintf(key, sizeof(key), "profile.%s.%s", id, field);
+        else snprintf(key, sizeof(key), "profile.%s", field);
+
+        char *line = text;
+        while (*line != '\0') {
+                char *nl = strchr(line, '\n');
+                if (nl != NULL) *nl = '\0';
+                char *p = line;
+                while (*p == ' ' || *p == '\t' || *p == '\r') p++;
+                if (*p != '\0' && *p != '#' && *p != ';') {
+                        char *eq = strchr(p, '=');
+                        if (eq != NULL) {
+                                *eq = '\0';
+                                char *k = p;
+                                char *v = eq + 1;
+                                size_t n = strlen(k);
+                                while (n > 0 && (k[n - 1] == ' ' || k[n - 1] == '\t')) k[--n] = '\0';
+                                while (*v == ' ' || *v == '\t') v++;
+                                if (strcmp(k, key) == 0) {
+                                        snprintf(out, cap, "%s", v);
+                                        return 0;
+                                }
+                        }
+                }
+                if (nl == NULL) break;
+                line = nl + 1;
+        }
+        return -1;
+}
+
+int li_plan_list_profiles(char ids[][24], char titles[][64], int max)
+{
+        char list[LI_VAL_LEN];
+        if (profile_get(NULL, "list", list, sizeof(list)) != 0) {
+                const char *fallback[] = { "modern", "upstream", "leopard-classic", "custom" };
+                for (int i = 0; i < 4 && i < max; i++) {
+                        snprintf(ids[i], 24, "%s", fallback[i]);
+                        snprintf(titles[i], 64, "%s", fallback[i]);
+                }
+                return 4 < max ? 4 : max;
+        }
+        int count = 0;
+        for (char *id = strtok(list, ", "); id != NULL && count < max; id = strtok(NULL, ", ")) {
+                char title[64];
+                if (profile_get(id, "title", title, sizeof(title)) != 0) snprintf(title, sizeof(title), "%s", id);
+                snprintf(ids[count], 24, "%s", id);
+                snprintf(titles[count], 64, "%s", title);
+                count++;
+        }
+        return count;
+}
+
+static int size_from_token(const char *token, uint64_t available, uint64_t *out)
+{
+        uint64_t value = 0;
+        char *end = NULL;
+        if (strcmp(token, "third") == 0) {
+                value = (available / 3) & ~(LI_ALIGN - 1);
+        } else if (strcmp(token, "rest") == 0 || strcmp(token, "-") == 0) {
+                value = available;
+        } else {
+                value = strtoul(token, &end, 10);
+                if (end != NULL && *end == 'M') value = value * 1024 * 1024 / LI_SECTOR;
+                else if (end != NULL && *end == '%') value = (available * value / 100) & ~(LI_ALIGN - 1);
+                else return -1;
+        }
+        if (value < LI_MIN_SECT) return -1;
+        *out = value;
+        return 0;
+}
+
+static int profile_layout(LiPlan *plan, uint64_t total, const char *id)
+{
+        char value[LI_VAL_LEN];
+        int count = 0;
+        uint64_t fixed = 0;
+
+        if (profile_get(id, "part.0", value, sizeof(value)) != 0) return -1;
+        uint64_t first = LI_ALIGN;
+        uint64_t last = total - LI_GPT_TAIL;
+        if (last <= first) return -1;
+        uint64_t usable = last - first + 1;
+
+        for (int i = 0; i < LI_PLAN_MAX_PARTS; i++) {
+                char key[32], spec[LI_VAL_LEN];
+                snprintf(key, sizeof(key), "part.%d", i);
+                if (profile_get(id, key, spec, sizeof(spec)) != 0) break;
+                char *bar = strchr(spec, '|');
+                if (bar == NULL) return -1;
+                *bar++ = '\0';
+                char *label = bar;
+                bar = strchr(label, '|');
+                if (bar == NULL) return -1;
+                *bar++ = '\0';
+                char *size = bar;
+                bar = strchr(size, '|');
+                if (bar == NULL) return -1;
+                *bar++ = '\0';
+                char *fs = bar;
+                bar = strchr(fs, '|');
+                if (bar == NULL) return -1;
+                *bar++ = '\0';
+                char *mount = bar;
+                bar = strchr(mount, '|');
+                if (bar != NULL) *bar++ = '\0';
+
+                snprintf(plan->parts[i].name, sizeof(plan->parts[i].name), "%s", spec);
+                snprintf(plan->parts[i].label, sizeof(plan->parts[i].label), "%s", label);
+                snprintf(plan->parts[i].fs, sizeof(plan->parts[i].fs), "%s", fs);
+                snprintf(plan->parts[i].mount, sizeof(plan->parts[i].mount), "%s", mount);
+                snprintf(plan->parts[i].type_code, sizeof(plan->parts[i].type_code), "%s",
+                         (bar != NULL && bar[0] != '\0') ? bar : (i == 0 ? "ef00" : "8300"));
+                count++;
+        }
+        if (count <= 0) return -1;
+
+        for (int i = 0; i < count; i++) {
+                char key[32], spec[LI_VAL_LEN];
+                snprintf(key, sizeof(key), "part.%d", i);
+                profile_get(id, key, spec, sizeof(spec));
+                char *p = spec;
+                for (int n = 0; n < 2; n++) { p = strchr(p, '|'); if (p) p++; }
+                if (p != NULL && p[0] >= '0' && p[0] <= '9' && strchr(p, 'M') != NULL) {
+                        uint64_t v = strtoul(p, NULL, 10) * 1024 * 1024 / LI_SECTOR;
+                        fixed += v;
+                }
+        }
+        if (fixed > usable) return -1;
+        uint64_t available = usable - fixed;
+        uint64_t cursor = first;
+        for (int i = 0; i < count; i++) {
+                char key[32], spec[LI_VAL_LEN];
+                snprintf(key, sizeof(key), "part.%d", i);
+                profile_get(id, key, spec, sizeof(spec));
+                char *p = spec;
+                for (int n = 0; n < 2; n++) { p = strchr(p, '|'); if (p) p++; }
+                char *bar = p ? strchr(p, '|') : NULL;
+                if (bar != NULL) *bar = '\0';
+                uint64_t size = 0;
+                uint64_t remaining = last - cursor + 1;
+                if (size_from_token(p ? p : "rest", available, &size) != 0) return -1;
+                if (strcmp(p, "rest") == 0 || strcmp(p, "-") == 0) size = remaining;
+                size &= ~7ULL;
+                if (size < LI_MIN_SECT || cursor + size - 1 > last) return -1;
+                plan->parts[i].start = cursor;
+                plan->parts[i].end = cursor + size - 1;
+                cursor = plan->parts[i].end + 1;
+        }
+        plan->part_count = count;
+        return li_plan_validate(plan);
+}
+
 static const char *state_or(const char *key, const char *fallback)
 {
         const char *value = li_state_get(key);
@@ -191,11 +366,23 @@ static int custom_layout(LiPlan *plan, uint64_t total)
 
 static void plan_metadata(LiPlan *plan)
 {
+        char profile_modules[LI_VAL_LEN] = "";
+        char profile_packages[LI_VAL_LEN] = "";
+        char profile_init[LI_PATH_LEN] = "";
+        profile_get(plan->scheme, "modules", profile_modules, sizeof(profile_modules));
+        profile_get(plan->scheme, "packages", profile_packages, sizeof(profile_packages));
+        profile_get(plan->scheme, "init", profile_init, sizeof(profile_init));
+
         const char *modules = li_state_get("modules");
+        if (modules == NULL || modules[0] == '\0') modules = profile_modules[0] ? profile_modules : NULL;
+        const char *packages = li_state_get("optional_packages");
+        if (packages == NULL || packages[0] == '\0') packages = profile_packages[0] ? profile_packages : NULL;
         const char *init = li_state_get("init");
+        if (init == NULL || init[0] == '\0') init = profile_init[0] ? profile_init : NULL;
         const char *finish = li_state_get("finish");
 
         snprintf(plan->modules, sizeof(plan->modules), "%s", modules ? modules : "");
+        snprintf(plan->optional_packages, sizeof(plan->optional_packages), "%s", packages ? packages : "");
         snprintf(plan->init, sizeof(plan->init), "%s", init ? init : "/system/leopard/leopard-rc.elf");
         plan->finish_shutdown = finish != NULL &&
                                 (strcmp(finish, "shutdown") == 0 || strcmp(finish, "poweroff") == 0);
@@ -216,10 +403,13 @@ int li_plan_build(LiPlan *plan, const char *disk, uint64_t total, const char *sc
 
         int rc;
         if (strcmp(scheme, "custom") == 0) rc = custom_layout(plan, total);
-        else if (strcmp(scheme, "leopard-classic") == 0) rc = classic_layout(plan, total);
-        else if (strcmp(scheme, "upstream") == 0) rc = upstream_layout(plan, total);
-        else if (strcmp(scheme, "modern") == 0) rc = modern_layout(plan, total);
-        else return -1;
+        else rc = profile_layout(plan, total, scheme);
+        if (rc != 0) {
+                if (strcmp(scheme, "leopard-classic") == 0) rc = classic_layout(plan, total);
+                else if (strcmp(scheme, "upstream") == 0) rc = upstream_layout(plan, total);
+                else if (strcmp(scheme, "modern") == 0) rc = modern_layout(plan, total);
+                else return -1;
+        }
         if (rc != 0) return rc;
 
         /* Classic: the root partition must be the first global index. */
@@ -300,6 +490,7 @@ int li_plan_store(const LiPlan *plan)
         if (plan == NULL || plan->part_count <= 0) return -1;
         char key[40], value[32];
 
+        li_state_set("profile", plan->scheme);
         li_state_set("scheme", plan->scheme);
         snprintf(value, sizeof(value), "%d", plan->part_count);
         li_state_set("part.count", value);
@@ -313,6 +504,7 @@ int li_plan_store(const LiPlan *plan)
                 snprintf(key, sizeof(key), "part.%d.fs", i); li_state_set(key, plan->parts[i].fs);
         }
         li_state_set("plan.modules", plan->modules);
+        li_state_set("plan.optional_packages", plan->optional_packages);
         li_state_set("plan.init", plan->init);
         li_state_set("plan.finish", plan->finish_shutdown ? "shutdown" : "reboot");
         return 0;
@@ -349,9 +541,11 @@ int li_plan_load(LiPlan *plan)
                 snprintf(plan->parts[i].fs, sizeof(plan->parts[i].fs), "%s", state_or(key, "ext4"));
         }
         const char *modules = li_state_get("plan.modules");
+        const char *packages = li_state_get("plan.optional_packages");
         const char *init = li_state_get("plan.init");
         const char *finish = li_state_get("plan.finish");
         snprintf(plan->modules, sizeof(plan->modules), "%s", modules ? modules : "");
+        snprintf(plan->optional_packages, sizeof(plan->optional_packages), "%s", packages ? packages : "");
         snprintf(plan->init, sizeof(plan->init), "%s", init ? init : "/system/leopard/leopard-rc.elf");
         plan->finish_shutdown = finish != NULL && strcmp(finish, "shutdown") == 0;
         plan->auto_mode = li_is_auto();

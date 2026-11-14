@@ -29,6 +29,7 @@ typedef struct {
         int        part_count;
         LiPlanPart parts[LI_PLAN_MAX_PARTS];
         char       modules[LI_VAL_LEN];
+        char       optional_packages[LI_VAL_LEN];
         char       init[LI_PATH_LEN];
         int        finish_shutdown;
         int        auto_mode;
@@ -40,6 +41,7 @@ int  li_plan_load(LiPlan *plan);
 int  li_plan_store(const LiPlan *plan);
 int  li_plan_validate(const LiPlan *plan);
 void li_plan_print(const LiPlan *plan);
+int  li_plan_list_profiles(char ids[][24], char titles[][64], int max);
 
 /* Interactive custom layout fallback; used only when scheme=custom and the
    option/state already does not describe valid partitions. */
