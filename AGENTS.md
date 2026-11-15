@@ -2,6 +2,14 @@
 
 LeopardOS 安装器：**声明式 InstallPlan + 序列执行器**。
 
+启动方式：live 环境的 initrc 是
+
+    respawn /apps/leopard/leopard-conhost.elf /apps/system/leopard-installer.elf
+
+即 conhost 拥有 console/VT，在 PTY 上运行 installer；installer 继续使用
+`XAPI_PRINTF` / `XAPI_INPUT`，由 conhost 的 X3TP terminal view 提供输入输出。
+不再直接 `respawn installer`，也不再依赖裸串口 TTY。
+
 ```
 main.c                              编排器：读 /config/leopard-install-sequence.conf，
                                     按行序以「全路径、无参数」执行步骤程序；失败问重试/关机
