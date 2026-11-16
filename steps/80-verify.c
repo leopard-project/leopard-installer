@@ -1,8 +1,8 @@
 /*
- * steps/80-verify.c — 步骤 80：整体校验（启动标记 + PID1 + initrc + 配置）
+ * steps/80-verify.c — Step 80: overall verification (boot marker + PID1 + initrc + config)
  *
- * 由 main.c（序列编排器）以全路径、无参数执行。
- * 任何一项缺失都说明系统起不来，直接失败，避免「装完重启黑屏/无限重启」。
+ * Run by main.c (the sequence orchestrator) by full path, no arguments.
+ * Any missing item means the system cannot boot, so fail outright to avoid "black screen / boot loop after install".
  */
 #include "li.h"
 

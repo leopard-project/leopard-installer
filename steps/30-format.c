@@ -1,9 +1,9 @@
 /*
- * steps/30-format.c — 步骤 30：把每个分区格式化成 FAT32
+ * steps/30-format.c — Step 30: format every partition as FAT32
  *
- * 由 main.c（序列编排器）以全路径、无参数执行。
- * 输入：part.count、part.N.node、part.N.label
- * 输出：part.N.formatted=1
+ * Run by main.c (the sequence orchestrator) by full path, no arguments.
+ * Input: part.count, part.N.node, part.N.label
+ * Output: part.N.formatted=1
  */
 #include "li.h"
 #include "li_format.h"

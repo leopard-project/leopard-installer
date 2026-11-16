@@ -1,42 +1,76 @@
 /*
- * leopard-installer — LeopardOS 安装器（序列化 RC 编排器）
+ * leopard-installer — LeopardOS installer (serialized RC orchestrator)
  *
- * 读取 /config/leopard-install-sequence.conf，按顺序逐条执行步骤程序：
- * 每步等待其运行完成再执行下一步。序列文件或步骤程序缺失则关机；
- * 步骤返回非 0 时提示重试或关机；全部成功后：
- *   - 交互模式：询问「重启 / 关机」（实体机可先拔掉安装介质再重启）
- *   - auto=1：按 finish=（reboot|shutdown）自动执行，缺省重启
- * 序列文件格式：每行一个步骤程序的全路径，无参数，# 开头为注释。
+ * Reads /config/leopard-install-sequence.conf and runs step programs one by one in order:
+ * each step is awaited to completion before the next runs. If the sequence file or a step
+ * program is missing, shut down; when a step returns non-zero, prompt retry or shutdown;
+ * after all succeed:
+ *   - interactive mode: ask "reboot / shutdown" (on physical machines you can remove the install media before rebooting)
+ *   - auto=1: follow finish=(reboot|shutdown) automatically, defaulting to reboot
+ * Sequence file format: one full path to a step program per line, no arguments; lines starting with # are comments.
  */
 #include "xtuiapi.h"
+
+#include <stdlib.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #define CONFIG_PATH "/config/leopard-install-sequence.conf"
 #define BUF_CAP     16384
 #define PATH_CAP    256
+#define MSG_CAP     512
 
 static void shutdown_now(void);
 static void reboot_now(void);
 static int  install_is_auto(void);
 static int  install_finish_is_shutdown(void);
 
+/*
+ * Top-level messages go to both the VT (xapi_Printf) and serial (xapi_OutputSerial).
+ * The installer runs under conhost's PTY; serial is the only reliable channel for
+ * headless tests and field diagnostics.
+ */
+static void install_msg(const char *fmt, ...)
+{
+        char    line[MSG_CAP];
+        va_list ap;
+
+        va_start(ap, fmt);
+        vsnprintf(line, sizeof(line), fmt, ap);
+        va_end(ap);
+
+        xapi_Printf("%s", line);
+        xapi_OutputSerial((WSTR)line);
+}
+
 static inline void read_line(char *buf, size_t cap)
 {
-        buf[0] = '\0';
-        enter_syscall(XAPI_INPUT, (uint64_t)buf, (uint64_t)cap, 0, 0, 0, 0);
+        char line[XAPI_GETLINE_BUFFER_SIZE];
+
+        if (buf == NULL || cap == 0) return;
+        xapi_Input((WSTR)line);
+        snprintf(buf, cap, "%s", line);
 }
 
 static inline int run_step(const char *path)
 {
         char *argv[2] = { (char *)path, NULL };
-        int64_t pid = (int64_t)xapi_RunArgs((WSTR)path, (WSTR *)argv);
+        pid_t pid = fork();
+        int  status = 0;
+
         if (pid < 0)
                 return -1;
-        int status = 0;
-        enter_syscall(SYS_WAIT4, (uint64_t)pid, (uint64_t)&status, 0, 0, 0, 0);
+        if (pid == 0) {
+                /* execve keeps the installer's fd 0/1/2, so the step stays on the PTY. */
+                execve(path, argv, environ);
+                _exit(127);
+        }
+        if (waitpid(pid, &status, 0) < 0)
+                return -1;
         return status;
 }
 
-/* 读一个 key=value 文本文件里的 auto 值；返回 1/0，未找到返回 -1。 */
+/* Read the auto value from a key=value text file; returns 1/0, or -1 if not found. */
 static int file_auto(const char *path)
 {
         XFILE   *fp = xapi_OpenFile((WSTR)path);
@@ -69,7 +103,7 @@ static int file_auto(const char *path)
         return result;
 }
 
-/* 与 li_is_auto 语义一致：选项文件先，state 覆盖；都没有则按交互模式。 */
+/* Same semantics as li_is_auto: options file first, state overrides; if neither, use interactive mode. */
 static int install_is_auto(void)
 {
         int opt = file_auto("/config/leopard-install.conf");
@@ -80,7 +114,7 @@ static int install_is_auto(void)
         return 0;
 }
 
-/* 读 finish= 值；返回 1 = shutdown，0 = reboot（缺省）。 */
+/* Read the finish= value; returns 1 = shutdown, 0 = reboot (default). */
 static int install_finish_is_shutdown(void)
 {
         const char *paths[2] = { "/config/installer/state", "/config/leopard-install.conf" };
@@ -120,9 +154,9 @@ static inline int ask_retry(void)
 {
         char line[16];
 
-        /* auto 模式：零输入，失败即关机，绝不阻塞等键盘 */
+        /* auto mode: zero input, shut down on failure, never block waiting for the keyboard */
         if (install_is_auto()) {
-                xapi_Printf("auto mode: step failed, shutting down (no retry)\n");
+                install_msg("auto mode: step failed, shutting down (no retry)\n");
                 return 0;
         }
         xapi_Printf("retry or shutdown? [r/s]: ");
@@ -138,7 +172,7 @@ int main(int argc, char *argv[], char *envp[])
 
         XFILE *fp = xapi_OpenFile((WSTR)CONFIG_PATH);
         if (fp == NULL) {
-                xapi_Printf("installer: sequence file not found: %s\n", CONFIG_PATH);
+                install_msg("installer: sequence file not found: %s\n", CONFIG_PATH);
                 shutdown_now();
         }
 
@@ -173,10 +207,10 @@ int main(int argc, char *argv[], char *envp[])
                         if (rc == 0)
                                 break;
                         if (rc < 0) {
-                                xapi_Printf("installer: step not found: %s\n", path);
+                                install_msg("installer: step not found: %s\n", path);
                                 shutdown_now();
                         }
-                        xapi_Printf("installer: step failed (rc=%d): %s\n", rc, path);
+                        install_msg("installer: step failed (rc=%d): %s\n", rc, path);
                         if (!ask_retry())
                                 shutdown_now();
                 }
@@ -187,14 +221,14 @@ next_line:
                 line = nl + 1;
         }
 
-        xapi_Printf("installer: all steps complete.\n");
+        install_msg("installer: all steps complete.\n");
         if (install_is_auto()) {
                 if (install_finish_is_shutdown()) shutdown_now();
-                xapi_Printf("installer: rebooting...\n");
+                install_msg("installer: rebooting...\n");
                 reboot_now();
         }
 
-        /* 交互模式：给用户拔掉安装介质/选择关机的机会。 */
+        /* Interactive mode: give the user a chance to remove the install media / choose shutdown. */
         for (;;) {
                 char choice[16];
 
@@ -217,20 +251,20 @@ next_line:
 
 static void shutdown_now(void)
 {
-        /* 关机；电源动作失败则挂起，避免继续安装 */
-        xapi_Printf("installer: shutting down...\n");
+        /* Shut down; if the power action fails, hang instead of continuing the install */
+        install_msg("installer: shutting down...\n");
         int64_t rc = (int64_t)xapi_PowerAction(XPOWER_SHUTDOWN);
-        if (rc != 0) xapi_Printf("installer: power action failed rc=%lld\n", (long long)rc);
+        if (rc != 0) install_msg("installer: power action failed rc=%lld\n", (long long)rc);
         for (;;)
                 xapi_Sleep(1000);
 }
 
 static void reboot_now(void)
 {
-        /* 重启；电源动作失败则挂起 */
-        xapi_Printf("installer: rebooting...\n");
+        /* Reboot; if the power action fails, hang */
+        install_msg("installer: rebooting...\n");
         int64_t rc = (int64_t)xapi_PowerAction(XPOWER_REBOOT);
-        if (rc != 0) xapi_Printf("installer: power action failed rc=%lld\n", (long long)rc);
+        if (rc != 0) install_msg("installer: power action failed rc=%lld\n", (long long)rc);
         for (;;)
                 xapi_Sleep(1000);
 }

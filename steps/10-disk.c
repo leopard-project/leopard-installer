@@ -1,9 +1,9 @@
 /*
- * steps/10-disk.c — 步骤 10：选择安装目标磁盘
+ * steps/10-disk.c — Step 10: choose the install target disk
  *
- * 由 main.c（序列编排器）以全路径、无参数执行。
- * 输入：选项/状态里的 disk（可选）
- * 输出：disk=<name>、disk.sectors=<n>
+ * Run by main.c (the sequence orchestrator) by full path, no arguments.
+ * Input: disk from options/state (optional)
+ * Output: disk=<name>, disk.sectors=<n>
  */
 #include "li.h"
 
@@ -64,7 +64,7 @@ int main(int argc, char *argv[], char *envp[])
         li_state_set("disk.sectors", value);
         li_log("target disk: /dev/%s (%llu sectors)", disk, (unsigned long long)sectors);
 
-        /* auto 模式 = 脚本化的明确意图：跳过破坏性确认（否则默认「否」会自断）。 */
+        /* auto mode = explicit scripted intent: skip the destructive confirmation (otherwise the default "no" would abort itself). */
         if (!li_is_auto() && !li_confirm("All data on this disk will be destroyed. Continue?", 0))
                 return li_step_end(li_fail("aborted by user", 0));
 

@@ -1,10 +1,10 @@
 /*
- * steps/60-config.c — 步骤 60：生成目标系统的启动期配置
+ * steps/60-config.c — Step 60: generate the target system's boot-time configuration
  *
- * 由 main.c（序列编排器）以全路径、无参数执行。
- * 产出（都在根分区，即 /mnt/system/config/）：
- *   fstab     —— 非根挂载：/apps、/users（fstype 必须 fatfs）
- *   boot.conf —— init= （内核 PID1 路径；引导器 open-xsboot 读取）
+ * Run by main.c (the sequence orchestrator) by full path, no arguments.
+ * Outputs (all on the root partition, i.e. /mnt/system/config/):
+ *   fstab     —— non-root mounts: /apps, /users (fstype must be fatfs)
+ *   boot.conf —— init= (kernel PID1 path; the open-xsboot bootloader reads it)
  */
 #include "li.h"
 
@@ -33,7 +33,7 @@ static int write_fstab(int count)
                 int         n;
 
                 if (node == NULL || mount == NULL) continue;
-                if (strcmp(mount, "/") == 0) continue; /* 根由内核 bound root 挂，不写进 fstab */
+                if (strcmp(mount, "/") == 0) continue; /* root is mounted by the kernel bound root, not written to fstab */
 
                 n = snprintf(text + used, sizeof(text) - used, "/dev/%s %s %s\n",
                              node, mount, fs);

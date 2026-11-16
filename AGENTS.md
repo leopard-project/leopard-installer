@@ -20,9 +20,9 @@ steps/NN-*.c                        其余步骤消费 plan 产出的 part.* 状
 include/li.h + lib/li_core.c        步骤公共库（状态/选项/日志/交互/子进程/块设备）
 data/leopard-install-sequence.conf  步骤清单（行序=执行顺序）
 data/leopard-install.conf           安装选项（auto / disk / profile / package_profile / modules …）
-data/install-profiles.conf          安装方案（分区布局 + 默认包/模块）
+data/install-profiles.conf          安装方案（只描述分区布局）
 data/format-profiles.conf           格式化方案（fstype → tool/args）
-data/package-profiles.conf          可选软件方案（minimal/standard/full/custom）
+data/package-profiles.conf          软件选择（核心环境 + 组 + minimal/standard/full/custom）
 ```
 
 ## 架构红线（改动前必读）
@@ -31,18 +31,21 @@ data/package-profiles.conf          可选软件方案（minimal/standard/full/c
   失败问重试/关机 → 全成功重启"。新增/调整步骤只动 `steps/` 和序列文件。
 - **布局只在 15-plan / li_plan.c 计算**：20-partition 只执行 plan；30/40/60 只读
   plan 写入的 `part.*`。不要在步骤里重新推导 scheme 或分区尺寸。
-- **安装方案来自配置**：`data/install-profiles.conf` 定义 modern / upstream /
-  leopard-classic / custom 的分区、可选包与模块；`profile=` 选择，旧 `scheme=` 兼容。
+- **安装方案只描述布局**：`data/install-profiles.conf` 定义 modern / upstream /
+  leopard-classic / custom 的分区；`profile=` 选择，旧 `scheme=` 兼容。
   不要在 C 里新增硬编码 scheme。
 - **格式化也来自配置**：`data/format-profiles.conf` 定义 `format.<fstype>.tool/args`；
   30-format 只按 `part.N.fs` 查表，新增 fstype 不应改 C 分支。
-- **可选软件也来自配置**：`data/package-profiles.conf` 定义
-  minimal / standard / full / custom；`45-packages-select` 选方案并写
-  `plan.optional_packages` / `plan.modules`，`50-packages` 只负责执行。
-  新增软件组合只改配置，不要在 50-packages 里写死列表。
-- **可选包/内核模块**：`package_profile=` 选方案；`modules=` / `optional_packages=`
-  可覆盖方案内容。50-packages 从 `/media` 安装，缺包只告警，不影响基础系统。
-  `minimal` 是真正的空集（用 `plan.packages_selected` 标记，不回退到 EXTRA_PACKAGES）。
+- **软件选择也来自配置**：`data/package-profiles.conf` 用声明式
+  `core.packages` + `group.<id>` + `package.<id>` 模型；`45-packages-select`
+  解析成 `plan.core_packages` / `plan.optional_packages` / `plan.modules`，
+  `50-packages` 只负责执行。新增软件组合只改配置，不要在步骤里写死列表。
+- **两个清单不许混用**：分区布局看 `install-profiles.conf`，软件看
+  `package-profiles.conf`；install-profiles 不再携带 packages/modules。
+- **包安装事务**：核心 + 可选包在**一次** xbps 事务里装（并集去重），模块一次事务；
+  合并事务失败自动重试 core-only 并告警，只有核心失败才让步骤失败。
+  `optional_packages=` / `modules=` 是显式用户覆盖；`minimal` 是真正的空集
+  （`plan.packages_selected` 标记，不回退到内置 EXTRA）。
 - **计划失败**：交互模式 15-plan 提供 `[r]etry / [c]hange profile / [s]hutdown`；
   auto 模式 fail-fast，不阻塞键盘。
 - **步骤程序之间不许互相调用**：只通过 `/config/installer/state`（key=value）交换数据。
@@ -65,18 +68,26 @@ data/package-profiles.conf          可选软件方案（minimal/standard/full/c
   （调用方须回退到 conf 里的 state 值）；`li_confirm` 返回默认值；`main.c` 的失败重试在 auto
   下直接关机（fail-fast），不打印 `[r/s]`。破坏性确认（如 10-disk 的「清盘」）在 auto 下跳过。
   无头测试 = 写全 conf（`auto=1 disk=sata0 profile=modern package_profile=standard`）+ 断言串口日志，不敲任何键。
+- **串口可观测性**：安装器跑在 conhost PTY 下，`xapi_Printf` 只进 VT；
+  `li_log` / `li_header` / `li_step_*` / `li_fail` 与 `main.c` 顶层消息额外用
+  `xapi_OutputSerial` 镜像到串口。无头测试依赖这条通道，不要删。
+- **子进程用 fork/execve**：`li_run`（步骤公共库）与 `main.c::run_step` 用
+  `fork()` + `execve()` + `waitpid()` 启动步骤/工具，子进程直接继承 fd 0/1/2
+  （conhost 的 PTY slave）。不要改回 `xapi_RunArgs`：它可能回退到 `/dev/stdio`，
+  导致步骤读不到 PTY 输入、也看不到终端输出。
 - 不新增内核 syscall、不改 `OpenXSKernel`；只用既有原语（`SYS_MOUNT`/`SYS_UMOUNT2`/`SYS_WAIT4`/`SYS_SYNC`…）。
 
 ## 状态键（步骤间契约）
 
-见 `README.md` 表格：`disk`、`profile`、`package_profile`、`part.*`、`mounted.*`、`plan.*`、`init`、
-`boot.marker`、`auto`。
+见 `README.md` 表格：`disk`、`profile`、`package_profile`、`part.*`、`mounted.*`、
+`plan.core_packages`、`plan.optional_packages`、`plan.modules`、`plan.packages_selected`、
+`plan.init`、`init`、`boot.marker`、`auto`。
 新增键请同时更新 README。
 
 ## 构建 / 打包
 
     python3 gen_ninja.py && ninja build   # → out/leopard-installer.elf + out/steps/*.elf
-    ninja pack                            # → 一个 xbps 包含编排器 + 全部步骤 + 两份配置
+    ninja pack                            # → 一个 xbps 包含编排器 + 全部步骤 + 五份配置
 
 - 静态 ELF，依赖 `../XJ380-SDK/out/crt`（`include/` 头 + `lib/x86_64/` 启动对象、`libxact.a`、`liballoc.a`）。
 - 链接固定 `-Ttext=0x200000`。

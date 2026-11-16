@@ -1,10 +1,10 @@
 /*
- * steps/90-finish.c — 步骤 90：落盘、逆序卸载
+ * steps/90-finish.c — Step 90: flush to disk, unmount in reverse order
  *
- * 由 main.c（序列编排器）以全路径、无参数执行；重启由编排器负责
- * （所有步骤成功后 main.c 自己 reboot），这里只把缓存刷下去、按逆序卸载。
+ * Run by main.c (the sequence orchestrator) by full path, no arguments; reboot is the orchestrator's job
+ * (main.c reboots itself after all steps succeed), so here we only flush caches down and unmount in reverse order.
  *
- * 输入：mounted.count、mounted.N.target
+ * Input: mounted.count, mounted.N.target
  */
 #include "li.h"
 

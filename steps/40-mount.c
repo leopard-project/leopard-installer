@@ -1,12 +1,12 @@
 /*
- * steps/40-mount.c — 步骤 40：挂载根分区与非根分区
+ * steps/40-mount.c — Step 40: mount the root partition and the non-root partitions
  *
- * 由 main.c（序列编排器）以全路径、无参数执行。
- * 输入：part.count、part.N.node、part.N.mount
- * 输出：mounted.count、mounted.N.{target,source}
+ * Run by main.c (the sequence orchestrator) by full path, no arguments.
+ * Input: part.count, part.N.node, part.N.mount
+ * Output: mounted.count, mounted.N.{target,source}
  *
- * 非根分区挂到 /mnt<mount>，例如 mount=/apps → /mnt/apps。
- * fstype 必须写 "fatfs"（内核 get_filesystem 精确 strcmp，写 vfat 会 -EINVAL）。
+ * Non-root partitions are mounted at /mnt<mount>, e.g. mount=/apps → /mnt/apps.
+ * fstype must be "fatfs" (the kernel's get_filesystem does an exact strcmp; "vfat" gives -EINVAL).
  */
 #include "li.h"
 
@@ -27,7 +27,7 @@ static int mount_retry(const char *source, const char *target, const char *fstyp
                 int64_t rc = (int64_t)enter_syscall(SYS_MOUNT, (uint64_t)source, (uint64_t)target,
                                                     (uint64_t)fstype, 0, 0, 0);
                 if (rc == 0) return 0;
-                xapi_Sleep(1000); /* 没有真正的 flush，块设备读回可能滞后 */
+                xapi_Sleep(1000); /* no real flush; block device read-back may lag */
         }
         return -1;
 }
@@ -79,7 +79,7 @@ int main(int argc, char *argv[], char *envp[])
 
         li_make_dirs(LI_TARGET);
 
-        /* 先挂根，再挂子目录：ext4 根挂到 /mnt 时不能已经有 /mnt/boot。 */
+        /* Mount root first, then subdirectories: an ext4 root mounted at /mnt must not already have /mnt/boot. */
         for (int pass = 0; pass < 2; pass++) {
                 for (int i = 0; i < count; i++) {
                         char        key[40];

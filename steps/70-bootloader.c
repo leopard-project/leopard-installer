@@ -1,13 +1,13 @@
 /*
- * steps/70-bootloader.c — 步骤 70：发布引导产物并写根绑定
+ * steps/70-bootloader.c — Step 70: publish boot artifacts and write the root binding
  *
- * ext4 方案（scheme=ext4）：
- *   ESP = /mnt/boot（FAT32），root = /mnt（ext4）
- *   1. 从 root 的 EFI/BOOT/BOOTX64.EFI、system/kernel.krl 复制到 ESP
- *   2. 计算 kernel 大小/CRC32C
- *   3. 用 20-partition 保存的 GPT GUID + 30-format 保存的 ext4 UUID
- *      写 ESP 的 EFI/XJ380/root.bin（96 字节）
- * 旧 FAT32 方案：只校验 root 上的 EFI + kernel 标记。
+ * ext4 scheme (scheme=ext4):
+ *   ESP = /mnt/boot (FAT32), root = /mnt (ext4)
+ *   1. Copy EFI/BOOT/BOOTX64.EFI and system/kernel.krl from root to the ESP
+ *   2. Compute the kernel size/CRC32C
+ *   3. Use the GPT GUID saved by 20-partition plus the ext4 UUID saved by 30-format
+ *      to write the ESP's EFI/XJ380/root.bin (96 bytes)
+ * Old FAT32 scheme: only verify the EFI + kernel markers on root.
  */
 #include "li.h"
 #include "root_binding.h"

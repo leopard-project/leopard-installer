@@ -1,11 +1,15 @@
 /*
- * li_core.c — 安装步骤程序公共库（每个步骤程序链接它）
+ * li_core.c — Shared library for install step programs (each step program links it)
  *
- * 只用 XAPI 与内核 syscall 原语（SDK 没有 POSIX open/read/write）。
- * 状态以 key=value 存于 /config/installer/state；/config/leopard-install.conf
- * 的键作为默认值先加载，state 里的值覆盖它。
+ * Uses only XAPI and kernel syscall primitives (the SDK has no POSIX open/read/write).
+ * State is stored as key=value in /config/installer/state; keys from
+ * /config/leopard-install.conf are loaded first as defaults, and values in state override them.
  */
 #include "li.h"
+
+#include <stdlib.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #ifndef O_RDONLY
 #define O_RDONLY 0
@@ -21,7 +25,7 @@ static char s_val[LI_MAX_KEYS][LI_VAL_LEN];
 static int  s_count;
 static int  s_loaded;
 
-/* ---------------- 字符串小工具 ---------------- */
+/* ---------------- Small string helpers ---------------- */
 
 static void li_copy(char *dst, size_t cap, const char *src)
 {
@@ -71,7 +75,7 @@ static void li_put(const char *key, const char *value)
         s_count++;
 }
 
-/* 读一个 key=value 文件，逐行进状态表 */
+/* Read a key=value file line by line into the state table */
 static void li_load_kv(const char *path)
 {
         static char text[LI_TEXT_CAP];
@@ -101,7 +105,7 @@ static void li_load_kv(const char *path)
         }
 }
 
-/* ---------------- 状态存储 ---------------- */
+/* ---------------- State store ---------------- */
 
 int li_state_load(void)
 {
@@ -109,8 +113,8 @@ int li_state_load(void)
         s_loaded = 1;
 
         xapi_Mkdir((WSTR)LI_STATE_DIR);
-        li_load_kv(LI_OPTIONS_PATH); /* 用户选项作默认值 */
-        li_load_kv(LI_STATE_PATH);   /* 已探测到的值覆盖它 */
+        li_load_kv(LI_OPTIONS_PATH); /* user options as defaults */
+        li_load_kv(LI_STATE_PATH);   /* already-probed values override them */
         return 0;
 }
 
@@ -162,7 +166,21 @@ int li_state_is(const char *key, const char *value)
         return (v != NULL) && strcmp(v, value) == 0;
 }
 
-/* ---------------- 日志 ---------------- */
+/* ---------------- Log ---------------- */
+
+/*
+ * The installer now runs under conhost's PTY; xapi_Printf only reaches the VT,
+ * not the serial port. Mirror key progress to serial here for headless tests
+ * and field diagnostics; VT output stays unchanged, so the installer's
+ * display path is preserved.
+ */
+static void li_serial_line(const char *text)
+{
+        char line[LI_LINE_LEN + 2];
+
+        snprintf(line, sizeof(line), "%s\n", text);
+        xapi_OutputSerial((WSTR)line);
+}
 
 static void li_log_append(const char *line)
 {
@@ -171,7 +189,7 @@ static void li_log_append(const char *line)
         size_t      used;
         size_t      n = strlen(line);
 
-        if (got >= sizeof(text) - 2) got = 0; /* 日志过大就截断重来 */
+        if (got >= sizeof(text) - 2) got = 0; /* log too large, truncate and start over */
         used = (size_t)got;
 
         while (n > 0 && (used + n + 2) > sizeof(text)) n--;
@@ -194,21 +212,35 @@ void li_log(const char *fmt, ...)
         va_end(ap);
 
         xapi_Printf("%s\n", line);
+        li_serial_line(line);
         li_log_append(line);
 }
 
 void li_header(const char *text)
 {
+        char line[LI_LINE_LEN];
+
         xapi_Printf("\n== %s ==\n", text);
+        snprintf(line, sizeof(line), "\n== %s ==\n", text);
+        xapi_OutputSerial((WSTR)line);
 }
 
-/* ---------------- 交互 ---------------- */
+/* ---------------- Interaction ---------------- */
 
 int li_is_auto(void)
 {
         const char *v = li_state_get("auto");
 
         return (v != NULL) && (strcmp(v, "1") == 0 || strcmp(v, "yes") == 0 || strcmp(v, "true") == 0);
+}
+
+static void li_read_line(char *out, size_t cap)
+{
+        char line[XAPI_GETLINE_BUFFER_SIZE];
+
+        if (out == NULL || cap == 0) return;
+        xapi_Input((WSTR)line);
+        snprintf(out, cap, "%s", line);
 }
 
 int li_confirm(const char *prompt, int default_yes)
@@ -218,8 +250,7 @@ int li_confirm(const char *prompt, int default_yes)
         if (li_is_auto()) return default_yes;
 
         xapi_Printf("%s %s: ", prompt, default_yes ? "[Y/n]" : "[y/N]");
-        line[0] = '\0';
-        enter_syscall(XAPI_INPUT, (uint64_t)line, sizeof(line), 0, 0, 0, 0);
+        li_read_line(line, sizeof(line));
         if (line[0] == '\0' || line[0] == '\r' || line[0] == '\n') return default_yes;
         return (line[0] == 'y' || line[0] == 'Y');
 }
@@ -230,27 +261,35 @@ int li_ask(const char *prompt, char *out, size_t cap)
 
         if (cap == 0) return -1;
         out[0] = '\0';
-        if (li_is_auto()) return -1; /* 无人值守时不阻塞 */
+        if (li_is_auto()) return -1; /* do not block when unattended */
 
         xapi_Printf("%s", prompt);
-        enter_syscall(XAPI_INPUT, (uint64_t)out, (uint64_t)cap, 0, 0, 0, 0);
+        li_read_line(out, cap);
         n = strlen(out);
         while (n > 0 && (out[n - 1] == '\r' || out[n - 1] == '\n' || out[n - 1] == ' ')) out[--n] = '\0';
         return 0;
 }
 
-/* ---------------- 子进程 ---------------- */
+/* ---------------- Subprocess ---------------- */
 
 int li_run(const char *path, char *const argv[])
 {
-        int64_t pid = (int64_t)xapi_RunArgs((WSTR)path, (WSTR *)argv);
-        int     status = 0;
+        pid_t pid = fork();
+        int   status = 0;
 
         if (pid < 0) {
                 li_log("cannot start %s", path);
                 return -1;
         }
-        enter_syscall(SYS_WAIT4, (uint64_t)pid, (uint64_t)&status, 0, 0, 0, 0);
+        if (pid == 0) {
+                /* The child inherits fd 0/1/2 from the installer's PTY. */
+                execve(path, argv, environ);
+                _exit(127);
+        }
+        if (waitpid(pid, &status, 0) < 0) {
+                li_log("cannot wait for %s", path);
+                return -1;
+        }
         return (status >> 8) & 0xFF;
 }
 
@@ -262,7 +301,7 @@ int li_run_tool(const char *file, char *const argv[])
         return li_run(path, argv);
 }
 
-/* ---------------- 文件 / 块设备 ---------------- */
+/* ---------------- File / block devices ---------------- */
 
 int li_open(const char *path, uint64_t flags)
 {
@@ -318,7 +357,7 @@ int li_write_text(const char *path, const char *text)
 {
         uint64_t wrote;
 
-        /* xapi_WriteFile 不截断，必须先删（重跑时避免尾部残留） */
+        /* xapi_WriteFile does not truncate, so delete first (avoid trailing residue on rerun) */
         if (li_file_exists(path)) xapi_DeleteFile((WSTR)path);
         wrote = xapi_WriteFile((WSTR)path, (char *)text, strlen(text), 0);
         return (wrote == 0) ? -1 : 0;
@@ -376,7 +415,7 @@ int li_make_dirs(const char *path)
         return 0;
 }
 
-/* ---------------- 步骤程序样板 ---------------- */
+/* ---------------- Step program boilerplate ---------------- */
 
 void li_step_begin(const char *title)
 {

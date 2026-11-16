@@ -366,17 +366,17 @@ static int custom_layout(LiPlan *plan, uint64_t total)
 
 static void plan_metadata(LiPlan *plan)
 {
-        char profile_modules[LI_VAL_LEN] = "";
-        char profile_packages[LI_VAL_LEN] = "";
         char profile_init[LI_PATH_LEN] = "";
-        profile_get(plan->scheme, "modules", profile_modules, sizeof(profile_modules));
-        profile_get(plan->scheme, "packages", profile_packages, sizeof(profile_packages));
         profile_get(plan->scheme, "init", profile_init, sizeof(profile_init));
 
+        /*
+         * Software selection lives only in package-profiles.conf and is
+         * resolved by 45-packages-select.  install-profiles.conf describes
+         * disk layout; optional_packages / modules here come only from
+         * explicit overrides in install.conf.
+         */
         const char *modules = li_state_get("modules");
-        if (modules == NULL || modules[0] == '\0') modules = profile_modules[0] ? profile_modules : NULL;
         const char *packages = li_state_get("optional_packages");
-        if (packages == NULL || packages[0] == '\0') packages = profile_packages[0] ? profile_packages : NULL;
         const char *init = li_state_get("init");
         if (init == NULL || init[0] == '\0') init = profile_init[0] ? profile_init : NULL;
         const char *finish = li_state_get("finish");

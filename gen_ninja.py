@@ -59,7 +59,7 @@ CRT_LIBS = [LIB / "libxact.a", LIB / "liballoc.a"]
 
 PKG = {
     "pkgname": "leopard-installer",
-    "pkgver":  "1.4.0_1",
+    "pkgver":  "1.5.1_1",
     "arch":    "x86_64",
     "desc":    "Leopard installer (sequencer + step programs)",
     "deps":    "",
@@ -151,7 +151,7 @@ def main():
     L += ["rule clean", "  command = rm -rf out .pkg", "build clean: clean"]
 
     (ROOT / "build.ninja").write_text("\n".join(L) + "\n", encoding="utf-8")
-    print("已生成 build.ninja（leopard-installer：编排器 + 9 个步骤程序）。"
+    print(f"已生成 build.ninja（leopard-installer：编排器 + {len(STEPS)} 个步骤程序）。"
           "用法：ninja build / ninja pack")
 
 
