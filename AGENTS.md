@@ -96,7 +96,7 @@ include/li_ui_host.h + lib/li_ui_host.c
   `fork()` + `execve()` + `waitpid()` 启动步骤/工具，子进程直接继承 fd 0/1/2
   （conhost 的 PTY slave）。不要改回 `xapi_RunArgs`：它可能回退到 `/dev/stdio`，
   导致步骤读不到 PTY 输入、也看不到终端输出。
-- 不新增内核 syscall、不改 `OpenXSKernel`；只用既有原语（`SYS_MOUNT`/`SYS_UMOUNT2`/`SYS_WAIT4`/`SYS_SYNC`…）。
+- 不新增内核 syscall、不改 `leopard-xsk`；只用既有原语（`SYS_MOUNT`/`SYS_UMOUNT2`/`SYS_WAIT4`/`SYS_SYNC`…）。
 
 ## 状态键（步骤间契约）
 
@@ -112,5 +112,5 @@ include/li_ui_host.h + lib/li_ui_host.c
     ninja pack                            # → 一个 xbps 包含编排器 + 全部步骤 + 五份配置
 
 - 编排器链接 `../lpcurses/out/liblpcurses.a`（静态、MIT）；步骤程序不链接 curses。
-- 静态 ELF，依赖 `../XJ380-SDK/out/crt`（`include/` 头 + `lib/x86_64/` 启动对象、`libxact.a`、`liballoc.a`）。
+- 静态 ELF，依赖 `../leopard-sdk/out/crt`（`include/` 头 + `lib/x86_64/` 启动对象、`libxact.a`、`liballoc.a`）。
 - 链接固定 `-Ttext=0x200000`。

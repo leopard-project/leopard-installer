@@ -164,7 +164,7 @@ int main(int argc, char *argv[], char *envp[])
                             LI_ESP_ROOT "/system/kernel.krl") != 0)
                         return li_step_end(li_fail("publish kernel to ESP", 0));
 
-                missing += check_file(LI_ESP_ROOT "/EFI/BOOT/BOOTX64.EFI", "OpenXSBoot on ESP");
+                missing += check_file(LI_ESP_ROOT "/EFI/BOOT/BOOTX64.EFI", "leopard-boot on ESP");
                 missing += check_file(LI_ESP_ROOT "/system/kernel.krl", "kernel on ESP");
                 missing += check_file(LI_ESP_ROOT "/system/boot.conf", "boot.conf on ESP (60-config)");
                 if (missing != 0) return li_step_end(li_fail("ESP boot files incomplete", missing));
@@ -173,8 +173,8 @@ int main(int argc, char *argv[], char *envp[])
                 missing += check_file(LI_ESP_ROOT "/EFI/XJ380/root.bin", "root binding (70)");
                 if (missing != 0) return li_step_end(li_fail("root binding missing", missing));
         } else {
-                missing += check_file(LI_TARGET "/EFI/BOOT/BOOTX64.EFI", "OpenXSBoot");
-                missing += check_file(LI_TARGET "/system/kernel.krl", "OpenXSKernel");
+                missing += check_file(LI_TARGET "/EFI/BOOT/BOOTX64.EFI", "leopard-boot");
+                missing += check_file(LI_TARGET "/system/kernel.krl", "leopard-xsk");
                 if (missing != 0)
                         return li_step_end(li_fail("boot markers incomplete", missing));
         }

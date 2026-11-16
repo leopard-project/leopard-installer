@@ -12,8 +12,8 @@ typedef struct {
 } check_t;
 
 static const check_t CHECKS[] = {
-        { "EFI/BOOT/BOOTX64.EFI",          "bootloader (OpenXSBoot)" },
-        { "system/kernel.krl",             "kernel (OpenXSKernel)" },
+        { "EFI/BOOT/BOOTX64.EFI",          "bootloader (leopard-boot)" },
+        { "system/kernel.krl",             "kernel (leopard-xsk)" },
         { "system/leopard/leopard-rc.elf", "PID1 (leopard-rc)" },
         { "system/config/initrc",          "service table (leopard-base)" },
         { "system/config/fstab",           "fstab (60-config)" },

@@ -18,7 +18,7 @@
 
 /* Fallback core set for old configs (without core.packages), matching package-profiles.conf. */
 static const char *CORE_PACKAGES[] = {
-        "OpenXSBoot", "OpenXSKernel", "leopard-base", "leopard-rc",
+        "leopard-boot", "leopard-xsk", "leopard-base", "leopard-rc",
         "leopard-getty", "leopard-conhost", "leopard-doas", "leopard-oobe", "leopard-shell", "leopard-mountd",
         "xbps", NULL
 };

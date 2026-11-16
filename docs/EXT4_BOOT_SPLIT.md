@@ -71,15 +71,15 @@ GPT，两块：
 | `20-partition` | 新默认 `scheme=ext4`：p0=ESP 64 MiB（ESP 类型 GUID，label `LP-ESP`），p1=root（Linux 类型 GUID，label `LEOPARD`，剩余空间）。保存 `disk.guid`、`part.0/1.guid`、`part.N.node/label/mount`。保留 `scheme=fat32` 旧三分区。 |
 | `30-format` | p0 `mkfs-fat32`；p1 `mkfs-ext4`，把 `uuid` 写入 `part.root.uuid`。 |
 | `40-mount` | root（ext4）挂 `/mnt`；ESP（fatfs）挂 `/mnt/boot`。不再有 `/mnt/apps`、`/mnt/users`。 |
-| `50-packages` | 只向 ext4 root 装系统包：`OpenXSKernel`/`OpenXSBoot` 不再装进 root（见 70）；root 集合 = base/rc/getty/oobe/shell/mountd/xbps(+utils)。 |
+| `50-packages` | 只向 ext4 root 装系统包：`leopard-xsk`/`leopard-boot` 不再装进 root（见 70）；root 集合 = base/rc/getty/oobe/shell/mountd/xbps(+utils)。 |
 | `60-config` | root：`/system/config/fstab`（只留注释/根）；ESP：`/system/boot.conf`（`init=/system/leopard/leopard-rc.elf`）。 |
-| `70-bootloader` | 从 `/media` 的 `OpenXSBoot`/`OpenXSKernel` 包里取出 `BOOTX64.EFI` 与 `kernel.krl` 写入 ESP；计算 kernel 长度/CRC32C；写 `EFI/XJ380/root.bin`；校验 `EFI/BOOT/BOOTX64.EFI`、`system/kernel.krl`、root.bin。 |
+| `70-bootloader` | 从 `/media` 的 `leopard-boot`/`leopard-xsk` 包里取出 `BOOTX64.EFI` 与 `kernel.krl` 写入 ESP；计算 kernel 长度/CRC32C；写 `EFI/XJ380/root.bin`；校验 `EFI/BOOT/BOOTX64.EFI`、`system/kernel.krl`、root.bin。 |
 | `80-verify` | 校验 ESP 三件套 + root 的 `system/leopard/leopard-rc.elf`、`system/config/initrc`、ext4 UUID 与 root.bin 一致。 |
 | `90-finish` | 先 sync，再逆序卸载 ESP、root。 |
 
 状态键新增：`disk.guid`、`part.N.guid`、`part.root.uuid`、`esp.mount`、`boot.marker`。
 
-**红线调整**：installer 现在“不复制二进制”。分离 ESP 后，`OpenXSBoot`/`OpenXSKernel`
+**红线调整**：installer 现在“不复制二进制”。分离 ESP 后，`leopard-boot`/`leopard-xsk`
 两个包的产物必须由 `70-bootloader` 发布到 ESP（xbps 不适合在 FAT32 ESP 上留元数据）。
 建议把红线改为：“系统包不复制；**引导产物由 70 从 /media 包中提取并发布到 ESP**”。
 
@@ -104,7 +104,7 @@ GPT，两块：
    - `include/efi/root_binding.h`（96 字节 ABI，boot/kernel 共享）。
    - `BOOT_CONFIG` 增加 `root_binding`；`mount_root` 按 GUID 选 root 并挂 ext4/FAT32。
    - 分区层需要 disk/root/ESP GUID 库存（我们的 `partition_t` 已有 GUID 字段）。
-3. **OpenXSBoot**：
+3. **leopard-boot**：
    - 读 `\EFI\XJ380\root.bin`、校验 ESP GUID、校验 kernel CRC；
    - 置 bound-root 标志并把 binding 放进 `BOOT_CONFIG`；
    - **flag 冲突**：上游 `BOUND_ROOT=(1<<8)` 与我们现有 `LIVE_ROOT=(1<<8)` 冲突。

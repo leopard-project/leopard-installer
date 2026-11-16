@@ -115,7 +115,7 @@ profile.modern.part.2=users|LP-USERS|rest|ext4|/users|8300
 类似 Debian tasksel / Fedora comps / Arch package groups：
 
 ```
-core.packages=OpenXSBoot,OpenXSKernel,leopard-base,leopard-rc,leopard-getty,leopard-conhost,leopard-doas,leopard-oobe,leopard-shell,leopard-mountd,xbps
+core.packages=leopard-boot,leopard-xsk,leopard-base,leopard-rc,leopard-getty,leopard-conhost,leopard-doas,leopard-oobe,leopard-shell,leopard-mountd,xbps
 
 group.list=console,input,network,usb
 group.console.title=Console tools
