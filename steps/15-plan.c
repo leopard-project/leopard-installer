@@ -7,6 +7,7 @@
  * This step is non-destructive: it only resolves and prints the plan.
  */
 #include "li.h"
+#include "li_ui.h"
 #include "li_plan.h"
 
 static int profile_index(char ids[][24], int count, const char *current)
@@ -18,23 +19,37 @@ static int profile_index(char ids[][24], int count, const char *current)
 
 static const char *choose_profile(const char *current)
 {
-        static char ids[8][24];
-        static char titles[8][64];
+        static char       ids[8][24];
+        static char       titles[8][64];
+        static li_ui_item items[8];
         int count = li_plan_list_profiles(ids, titles, 8);
         int selected = profile_index(ids, count, current);
+        int idx;
 
         if (li_is_auto() || count <= 0) return current;
 
-        xapi_Printf("Installation profile:\n");
-        for (int i = 0; i < count; i++)
-                xapi_Printf("  %d) %s\n", i + 1, titles[i]);
-        char answer[8];
-        xapi_Printf("Choice [%d]: ", selected + 1);
-        if (li_ask("", answer, sizeof(answer)) == 0 && answer[0] >= '1' && answer[0] <= '9') {
-                int choice = answer[0] - '1';
-                if (choice < count) selected = choice;
+        for (int i = 0; i < count; i++) {
+                items[i].title = titles[i];
+                items[i].desc = NULL;
         }
-        return ids[selected];
+
+        idx = li_ui_menu("Installation profile", items, count, selected);
+        if (idx < 0 || idx >= count) return current;
+        return ids[idx];
+}
+
+static int plan_actions(const char *profile)
+{
+        li_ui_item items[3];
+
+        items[0].title = "Retry";
+        items[0].desc = "Try the same profile again";
+        items[1].title = "Change profile";
+        items[1].desc = "Pick a different layout";
+        items[2].title = "Shut down";
+        items[2].desc = "Stop the installer";
+
+        return li_ui_menu("Install plan failed", items, 3, 0);
 }
 
 int main(int argc, char *argv[], char *envp[])
@@ -83,14 +98,18 @@ int main(int argc, char *argv[], char *envp[])
                         return li_step_end(0);
                 }
 
-                xapi_Printf("installer: plan failed for profile '%s'.\n", profile);
+                li_log("installer: plan failed for profile '%s'.", profile);
                 if (li_is_auto())
                         return li_step_end(li_fail("auto mode: install plan is incomplete or disk is too small", 0));
 
-                char choice[8];
-                xapi_Printf("  [r]etry / [c]hange profile / [s]hutdown: ");
-                if (li_ask("", choice, sizeof(choice)) != 0) return li_step_end(1);
-                if (choice[0] == 's' || choice[0] == 'S') return li_step_end(li_fail("cancelled by user", 0));
-                if (choice[0] == 'c' || choice[0] == 'C') choose = 1;
+                {
+                        int action = plan_actions(profile);
+
+                        if (action == 2 || action < 0) {
+                                li_log("cancelled by user");
+                                return li_step_end(li_fail("cancelled by user", 0));
+                        }
+                        if (action == 1) choose = 1;
+                }
         }
 }

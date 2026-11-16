@@ -21,7 +21,10 @@ ROOT = Path(__file__).resolve().parent
 OUT  = ROOT / "out"
 
 # 步骤程序共享的库（状态 / 选项 / 日志 / 交互 / 子进程 / 块设备）
-COMMON_SOURCES = ["lib/li_core.c", "lib/li_plan.c", "lib/li_format.c"]
+COMMON_SOURCES = ["lib/li_core.c", "lib/li_plan.c", "lib/li_format.c", "lib/li_ui.c"]
+
+# 编排器（main.c）链接 TUI host + lpcurses；步骤程序不链接 curses。
+ORCH_SOURCES = ["main.c", "lib/li_ui_host.c", "lib/li_tui.c"]
 
 # 步骤程序：(id, 源文件)。id 同时是产物名和 sequence.conf 里的文件名。
 STEPS = [
@@ -57,9 +60,14 @@ LIB      = CRT_ROOT / "out" / "crt" / "lib" / "x86_64"
 CRT_OBJS = [LIB / "crt0.o", LIB / "start.o"]
 CRT_LIBS = [LIB / "libxact.a", LIB / "liballoc.a"]
 
+# lpcurses（../lpcurses）：只链接编排器，运行期无依赖。
+LPCURSES_ROOT = ROOT / ".." / "lpcurses"
+LPCURSES_INC  = LPCURSES_ROOT / "include"
+LPCURSES_LIB  = LPCURSES_ROOT / "out" / "liblpcurses.a"
+
 PKG = {
     "pkgname": "leopard-installer",
-    "pkgver":  "1.5.1_1",
+    "pkgver":  "1.6.0_1",
     "arch":    "x86_64",
     "desc":    "Leopard installer (sequencer + step programs)",
     "deps":    "",
@@ -89,8 +97,8 @@ def main():
 
     common = (f"{col} {opt} -Wall -g -ffreestanding -fno-builtin -m64 -mstackrealign "
               "-fno-stack-protector -fno-exceptions -fno-strict-aliasing -fshort-wchar -nostdinc")
-    c_flags   = f"{common} -std=c11   -I {rel(INC)} -I {rel(ROOT / 'include')} -I . -MMD -MP"
-    cpp_flags = f"{common} -std=c++11 -I {rel(INC)} -I {rel(ROOT / 'include')} -I . -Wno-write-strings -MMD -MP"
+    c_flags   = f"{common} -std=c11   -I {rel(INC)} -I {rel(ROOT / 'include')} -I {rel(LPCURSES_INC)} -I . -MMD -MP"
+    cpp_flags = f"{common} -std=c++11 -I {rel(INC)} -I {rel(ROOT / 'include')} -I {rel(LPCURSES_INC)} -I . -Wno-write-strings -MMD -MP"
 
     L = ["# leopard-installer 构建 + xbps 打包（编排器 + 步骤程序）", "ninja_required_version = 1.10",
          f"cc = {cc}", f"cxx = {cxx}", f"ld = {ld}",
@@ -115,10 +123,10 @@ def main():
     common_objs = [obj_for(src) for src in COMMON_SOURCES]
     L.append("")
 
-    # 编排器：main.c 自己完成输入/等待/重启，不链接 steps 的公共库
+    # 编排器：main.c + TUI host（不链接步骤公共库，避免把步骤逻辑带进来）
     orch_target = OUT / "leopard-installer.elf"
-    orch_objs   = [obj_for("main.c")]
-    ins = CRT_OBJS + orch_objs + CRT_LIBS
+    orch_objs   = [obj_for(src) for src in ORCH_SOURCES]
+    ins = CRT_OBJS + orch_objs + [LPCURSES_LIB] + CRT_LIBS
     L += [f"build {esc(orch_target)}: link {' '.join(esc(o) for o in ins)}", ""]
 
     # 步骤程序：每个都链接公共库

@@ -20,6 +20,7 @@
  * Unknown group names are warned about and skipped; they never abort install.
  */
 #include "li.h"
+#include "li_ui.h"
 
 #define PKG_PROFILES_PATH "/config/package-profiles.conf"
 
@@ -229,11 +230,13 @@ static int list_profiles(char ids[][24], char titles[][80], char descs[][160], i
 
 static const char *choose_profile(const char *current)
 {
-        static char ids[8][24];
-        static char titles[8][80];
-        static char descs[8][160];
+        static char       ids[8][24];
+        static char       titles[8][80];
+        static char       descs[8][160];
+        static li_ui_item items[8];
         int count = list_profiles(ids, titles, descs, 8);
         int selected = -1;
+        int idx;
 
         for (int i = 0; i < count; i++)
                 if (strcmp(ids[i], current) == 0) selected = i;
@@ -248,27 +251,22 @@ static const char *choose_profile(const char *current)
         if (count <= 0) return (current != NULL && current[0] != '\0') ? current : "standard";
         if (li_is_auto()) return ids[selected];
 
-        xapi_Printf("Package profile:\n");
         for (int i = 0; i < count; i++) {
-                xapi_Printf("  %d) %s\n", i + 1, titles[i]);
-                if (descs[i][0] != '\0')
-                        xapi_Printf("     %s\n", descs[i]);
+                items[i].title = titles[i];
+                items[i].desc = descs[i][0] != '\0' ? descs[i] : NULL;
         }
-        char answer[8];
-        xapi_Printf("Choice [%d]: ", selected + 1);
-        if (li_ask("", answer, sizeof(answer)) == 0 && answer[0] >= '1' && answer[0] <= '9') {
-                int choice = answer[0] - '1';
-                if (choice < count) selected = choice;
-        }
-        return ids[selected];
+
+        idx = li_ui_menu("Package profile", items, count, selected);
+        if (idx < 0 || idx >= count) return ids[selected];
+        return ids[idx];
 }
 
 static int confirm_selection(const char *core, const char *packages, const char *modules)
 {
-        xapi_Printf("Core packages:     %s\n", core[0] ? core : "(none)");
-        xapi_Printf("Optional packages: %s\n", packages[0] ? packages : "(none)");
-        xapi_Printf("Kernel modules:    %s\n", modules[0] ? modules : "(none)");
-        return li_confirm("Install this software selection?", 1);
+        li_log("core packages: %s", core[0] ? core : "(none)");
+        li_log("optional packages: %s", packages[0] ? packages : "(none)");
+        li_log("kernel modules: %s", modules[0] ? modules : "(none)");
+        return li_ui_confirm("Install this software selection?", 1);
 }
 
 int main(int argc, char *argv[], char *envp[])

@@ -8,8 +8,14 @@
  *   - interactive mode: ask "reboot / shutdown" (on physical machines you can remove the install media before rebooting)
  *   - auto=1: follow finish=(reboot|shutdown) automatically, defaulting to reboot
  * Sequence file format: one full path to a step program per line, no arguments; lines starting with # are comments.
+ *
+ * UI modes:
+ *   auto  auto=1: no screen, no prompts, serial log only.
+ *   line  non-tty or LEOPARD_INSTALL_TUI=0: the historical line prompts.
+ *   tui   interactive tty: main owns one lpcurses screen; steps talk to it over LI_UI_FD.
  */
 #include "xtuiapi.h"
+#include "li_ui_host.h"
 
 #include <stdlib.h>
 #include <sys/wait.h>
@@ -19,6 +25,12 @@
 #define BUF_CAP     16384
 #define PATH_CAP    256
 #define MSG_CAP     512
+#define MAX_STEPS   64
+
+static char g_steps[MAX_STEPS][PATH_CAP];
+static const char *g_step_ptrs[MAX_STEPS];
+static int  g_step_count;
+static int  g_tui_active;
 
 static void shutdown_now(void);
 static void reboot_now(void);
@@ -28,7 +40,8 @@ static int  install_finish_is_shutdown(void);
 /*
  * Top-level messages go to both the VT (xapi_Printf) and serial (xapi_OutputSerial).
  * The installer runs under conhost's PTY; serial is the only reliable channel for
- * headless tests and field diagnostics.
+ * headless tests and field diagnostics.  In TUI mode the VT belongs to lpcurses,
+ * so only serial is written.
  */
 static void install_msg(const char *fmt, ...)
 {
@@ -39,7 +52,8 @@ static void install_msg(const char *fmt, ...)
         vsnprintf(line, sizeof(line), fmt, ap);
         va_end(ap);
 
-        xapi_Printf("%s", line);
+        if (!g_tui_active)
+                xapi_Printf("%s", line);
         xapi_OutputSerial((WSTR)line);
 }
 
@@ -164,61 +178,80 @@ static inline int ask_retry(void)
         return (line[0] == 'r' || line[0] == 'R');
 }
 
-int main(int argc, char *argv[], char *envp[])
+/* Parse the sequence file once; the TUI needs the full list up front. */
+static int load_sequence(void)
 {
-        (void)argc;
-        (void)argv;
-        (void)envp;
+        XFILE   *fp;
+        uint64_t len;
+        char    *line;
+        char     buf[BUF_CAP];
+        uint64_t got;
 
-        XFILE *fp = xapi_OpenFile((WSTR)CONFIG_PATH);
+        fp = xapi_OpenFile((WSTR)CONFIG_PATH);
         if (fp == NULL) {
                 install_msg("installer: sequence file not found: %s\n", CONFIG_PATH);
-                shutdown_now();
+                return -1;
         }
 
-        uint64_t len = fp->length;
-        char buf[BUF_CAP];
-        if (len >= sizeof(buf))
-                len = sizeof(buf) - 1;
+        len = fp->length;
+        if (len >= sizeof(buf)) len = sizeof(buf) - 1;
         memset(buf, 0, sizeof(buf));
-        uint64_t got = xapi_ReadFile((WSTR)CONFIG_PATH, buf, len, 0);
+        got = xapi_ReadFile((WSTR)CONFIG_PATH, buf, len, 0);
         xapi_CloseFile(fp);
         buf[got] = '\0';
 
-        char *line = buf;
-        while (*line) {
+        g_step_count = 0;
+        line = buf;
+        while (*line && g_step_count < MAX_STEPS) {
                 char *nl = strchr(line, '\n');
-                if (nl)
-                        *nl = '\0';
-                while (*line == ' ' || *line == '\t' || *line == '\r')
-                        line++;
-                if (*line == '\0' || *line == '#')
-                        goto next_line;
+                int   i = 0;
 
-                char path[PATH_CAP];
-                memset(path, 0, sizeof(path));
-                int i = 0;
-                while (*line != '\0' && *line != ' ' && *line != '\t' && *line != '\r'
-                       && i < (int)sizeof(path) - 1)
-                        path[i++] = *line++;
+                if (nl) *nl = '\0';
+                while (*line == ' ' || *line == '\t' || *line == '\r') line++;
+                if (*line != '\0' && *line != '#') {
+                        while (*line != '\0' && *line != ' ' && *line != '\t' &&
+                               *line != '\r' && i < PATH_CAP - 1)
+                                g_steps[g_step_count][i++] = *line++;
+                        g_steps[g_step_count][i] = '\0';
+                        if (i > 0) {
+                                g_step_ptrs[g_step_count] = g_steps[g_step_count];
+                                g_step_count++;
+                        }
+                }
+                if (!nl) break;
+                line = nl + 1;
+        }
+        return g_step_count > 0 ? 0 : -1;
+}
 
+static int want_tui(void)
+{
+        const char *env = getenv("LEOPARD_INSTALL_TUI");
+
+        if (install_is_auto()) return 0;
+        if (env != NULL && env[0] != '\0') {
+                if (env[0] == '0') return 0;
+                if (env[0] == '1') return 1;
+        }
+        return isatty(0) && isatty(1);
+}
+
+static int run_line(void)
+{
+        for (int i = 0; i < g_step_count; i++) {
                 for (;;) {
-                        int rc = run_step(path);
+                        int rc = run_step(g_steps[i]);
+
                         if (rc == 0)
                                 break;
                         if (rc < 0) {
-                                install_msg("installer: step not found: %s\n", path);
+                                install_msg("installer: step not found: %s\n", g_steps[i]);
                                 shutdown_now();
                         }
-                        install_msg("installer: step failed (rc=%d): %s\n", rc, path);
+                        install_msg("installer: step failed (rc=%d): %s\n", rc, g_steps[i]);
                         if (!ask_retry())
                                 shutdown_now();
                 }
-
-next_line:
-                if (!nl)
-                        break;
-                line = nl + 1;
         }
 
         install_msg("installer: all steps complete.\n");
@@ -238,15 +271,73 @@ next_line:
                 xapi_Printf("Choice [1]: ");
                 read_line(choice, sizeof(choice));
 
-                if (choice[0] == '2' || choice[0] == 's' || choice[0] == 'S') {
+                if (choice[0] == '2' || choice[0] == 's' || choice[0] == 'S')
                         shutdown_now();
-                }
-                if (choice[0] == '\0' || choice[0] == '1' || choice[0] == 'r' || choice[0] == 'R') {
+                if (choice[0] == '\0' || choice[0] == '1' || choice[0] == 'r' || choice[0] == 'R')
                         reboot_now();
-                }
                 xapi_Printf("invalid choice\n");
         }
         return 0;
+}
+
+static int run_tui(void)
+{
+        if (li_ui_host_init(g_step_ptrs, g_step_count) != 0) {
+                install_msg("installer: TUI unavailable, falling back to line mode\n");
+                return run_line();
+        }
+
+        g_tui_active = 1;
+        install_msg("installer: TUI mode (%d steps)\n", g_step_count);
+
+        if (!li_ui_host_welcome()) {
+                li_ui_host_end();
+                g_tui_active = 0;
+                shutdown_now();
+        }
+
+        for (int i = 0; i < g_step_count; i++) {
+                li_ui_host_set_step(i);
+                for (;;) {
+                        int rc = li_ui_host_run(g_steps[i]);
+
+                        if (rc == 0)
+                                break;
+                        install_msg("installer: step failed (rc=%d): %s\n", rc, g_steps[i]);
+                        if (!li_ui_host_retry(i, rc)) {
+                                li_ui_host_end();
+                                g_tui_active = 0;
+                                shutdown_now();
+                        }
+                }
+        }
+
+        install_msg("installer: all steps complete.\n");
+        {
+                int reboot = li_ui_host_finish();
+
+                li_ui_host_end();
+                g_tui_active = 0;
+                if (reboot) {
+                        install_msg("installer: rebooting...\n");
+                        reboot_now();
+                }
+                shutdown_now();
+        }
+        return 0;
+}
+
+int main(int argc, char *argv[], char *envp[])
+{
+        (void)argc;
+        (void)argv;
+        (void)envp;
+
+        if (load_sequence() != 0) {
+                install_msg("installer: no install steps configured\n");
+                shutdown_now();
+        }
+        return want_tui() ? run_tui() : run_line();
 }
 
 static void shutdown_now(void)

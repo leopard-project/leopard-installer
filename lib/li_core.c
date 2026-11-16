@@ -6,6 +6,7 @@
  * /config/leopard-install.conf are loaded first as defaults, and values in state override them.
  */
 #include "li.h"
+#include "li_ui.h"
 
 #include <stdlib.h>
 #include <sys/wait.h>
@@ -247,6 +248,11 @@ int li_confirm(const char *prompt, int default_yes)
 {
         char line[8];
 
+        /* In TUI mode the orchestrator owns the screen: route through the
+         * modal confirm dialog instead of printing on the captured PTY. */
+        if (li_ui_active())
+                return li_ui_confirm(prompt, default_yes) != 0;
+
         if (li_is_auto()) return default_yes;
 
         xapi_Printf("%s %s: ", prompt, default_yes ? "[Y/n]" : "[y/N]");
@@ -261,6 +267,12 @@ int li_ask(const char *prompt, char *out, size_t cap)
 
         if (cap == 0) return -1;
         out[0] = '\0';
+
+        /* Same rule as li_confirm: a TUI step must never read the PTY
+         * directly.  li_ui_input blocks on the inherited UI pipe instead. */
+        if (li_ui_active())
+                return li_ui_input(prompt, out, cap) == LI_UI_OK ? 0 : -1;
+
         if (li_is_auto()) return -1; /* do not block when unattended */
 
         xapi_Printf("%s", prompt);
@@ -419,15 +431,19 @@ int li_make_dirs(const char *path)
 
 void li_step_begin(const char *title)
 {
+        li_ui_step(title);
         li_header(title);
         li_state_load();
         li_log("[step] %s", title);
+        li_ui_progress(0, title);
 }
 
 int li_step_end(int rc)
 {
         li_state_save();
         li_log("[step] result=%s", (rc == 0) ? "ok" : "failed");
+        li_ui_progress(100, rc == 0 ? "done" : "failed");
+        li_ui_done(rc);
         return rc;
 }
 

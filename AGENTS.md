@@ -25,6 +25,27 @@ data/format-profiles.conf           格式化方案（fstype → tool/args）
 data/package-profiles.conf          软件选择（核心环境 + 组 + minimal/standard/full/custom）
 ```
 
+## TUI 架构（1.6.0 起）
+
+```
+main.c                               TUI 唯一 owner：lpcurses 屏幕 + 步骤序列 + 日志面板
+include/li_ui.h + lib/li_ui.c        步骤侧协议客户端；line/auto 回退
+include/li_tui.h + lib/li_tui.c      lpcurses 控件：框架、菜单、输入、确认、日志环
+include/li_ui_host.h + lib/li_ui_host.c
+                                     编排器侧：UI 管道、子进程、请求路由、日志捕获
+```
+
+- **只有编排器调用 curses**。步骤程序绝不 `initscr()`；TUI 模式下它们通过
+  `LI_UI_FD` / `LI_UI_OUT_FD` 发 `MENU` / `INPUT` / `CONFIRM`，行模式才走
+  `xapi_Input`。
+- **auto=1 永不初始化 curses**；`LEOPARD_INSTALL_TUI=0` 或非 tty 走 line 模式；
+  `initscr()` 失败必须回退 line，不能中止安装。
+- 子进程的 stdout/stderr 接到日志管道，stdin 关闭；编排器在模态循环里
+  用 poll 排空日志，**不要先 read 再 poll**（空管道会阻塞，菜单就再也读不到键）。
+- 模态边界镜像到串口：`installer: ui menu|input|confirm|error|finish ...`，
+  无头 TUI 测试靠它同步按键。
+- `lpcurses` 是构建期静态依赖（MIT），链接编排器，不进入运行期包依赖。
+
 ## 架构红线（改动前必读）
 
 - **main.c 是编排器，不许把安装逻辑写回去**：它只负责"读序列 → 逐个起进程 → 等退出 →
@@ -86,8 +107,10 @@ data/package-profiles.conf          软件选择（核心环境 + 组 + minimal/
 
 ## 构建 / 打包
 
+    (cd ../lpcurses && python3 gen_ninja.py && ninja build)   # 首次构建期依赖
     python3 gen_ninja.py && ninja build   # → out/leopard-installer.elf + out/steps/*.elf
     ninja pack                            # → 一个 xbps 包含编排器 + 全部步骤 + 五份配置
 
+- 编排器链接 `../lpcurses/out/liblpcurses.a`（静态、MIT）；步骤程序不链接 curses。
 - 静态 ELF，依赖 `../XJ380-SDK/out/crt`（`include/` 头 + `lib/x86_64/` 启动对象、`libxact.a`、`liballoc.a`）。
 - 链接固定 `-Ttext=0x200000`。
