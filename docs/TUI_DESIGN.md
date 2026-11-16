@@ -229,16 +229,29 @@ installer: ui finish
 - Resize: `KEY_RESIZE` redraws; the install is not aborted.
 - Terminal restore: `endwin()` on every normal/TUI exit path.
 
-## Kernel dependency
+## PTY / session teardown
 
-The TUI forks a step child while conhost keeps writing keyboard bytes to the PTY
-master. OpenXSKernel's `vfs_close()` previously called the PTY close callback on
-every duplicated-fd close, so the child replacing fd 1/2 with the log pipe drove
-`slave_fds` to zero. `ptmx_write()` then returned `EIO` and all keyboard input
-silently stopped after the first modal.
+Two issues showed up while validating the TUI and the installed system:
 
-The fix is in `OpenXSKernel/driver/fs/vfs/vfs.cpp`: the PTY close callback runs
-only when `node->refcount` reaches zero. The kernel release string stays
+1. **Installer log pump**: the host must `poll()` the step log pipe before
+   `read()`. Reading an empty pipe inside a modal blocks the key loop, so the
+   TUI looks dead even though the PTY still has input. `host_read_log()` polls
+   first; this is the only TUI-side PTY-related fix.
+
+2. **conhost term_fd**: conhost keeps a lazily opened slave fd for
+   `pty_no_echo()` (IME password context). After the session child exits, that
+   extra slave reference kept the PTY pair alive, so the master read never
+   reported EOF and conhost waited for `master_eof` forever. getty was not
+   restarted after OOBE. `leopard-conhost 1.0_6` closes the cached `term_fd`
+   as soon as `waitpid()` reports the child (or `ECHILD`), before waiting for
+   EOF.
+
+The kernel `vfs_close()` PTY path must keep the original per-close callback
+semantics: `slave_fds`/`master_fds` are handle counts, decremented on every
+close. Deferring the callback to `node->refcount == 0` looks correct but the
+slave node carries a creation reference held by `pair->slave_node`, so the
+count never reaches zero and EOF is never signalled. An experimental kernel
+change along those lines was reverted; the kernel release string stays
 `2.2.1_1` (new build, not a version bump).
 
 ## Build and packaging
